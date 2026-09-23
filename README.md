@@ -18,7 +18,7 @@
   <a href="https://github.com/DonMikone/CloudWire/releases"><img src="https://img.shields.io/badge/Download-CloudWire%20for%20macOS-FF6A13?style=for-the-badge&logo=apple&logoColor=white" alt="Download CloudWire for macOS"></a>
 </p>
 
-CloudWire is an open-source macOS client for Nextcloud and every other cloud that [rclone](https://rclone.org) supports. It mounts your cloud as Finder drives that stream on demand, and it keeps the folders you work with as real local files that sync both ways in the background. Sharing and client-side encryption are one right-click away in Finder.
+CloudWire is a free, open-source cloud storage client for macOS. It works with Nextcloud, ownCloud, Google Drive, OneDrive, Dropbox, iCloud Drive, Box, pCloud, Amazon S3, WebDAV, SFTP and every other cloud that [rclone](https://rclone.org) supports ([full list](#supported-clouds)). It mounts your cloud as Finder drives that stream on demand, and it keeps the folders you work with as real local files that sync both ways in the background. Sharing and client-side encryption are one right-click away in Finder.
 
 ## Why CloudWire
 
@@ -35,7 +35,7 @@ Everything heavy runs in a small background service built on rclone, so closing 
 
 | Area | What you get |
 | --- | --- |
-| **Mounts** | Any rclone provider as a Finder drive under `~/CloudWire/Laufwerke`. Uses the built-in macOS NFS client by default; FUSE (FUSE-T or macFUSE) can be selected per Mount when installed. Simple options (read-only, cache size, auto-mount) plus every rclone VFS, mount and NFS option in an advanced form. Mounts come back after crashes, sleep and network changes. |
+| **Mounts** | Any [supported cloud](#supported-clouds) as a Finder drive under `~/CloudWire/Laufwerke`. Uses the built-in macOS NFS client by default; FUSE (FUSE-T or macFUSE) can be selected per Mount when installed. Simple options (read-only, cache size, auto-mount) plus every rclone VFS, mount and NFS option in an advanced form. Mounts come back after crashes, sleep and network changes. |
 | **Offline Items** | A cloud folder, or selected files of one folder, kept as real local files and synced both ways with rclone bisync. Choose the Storage Location per item, including external drives; moving it relocates files without downloading again. Conflicts keep both versions (`Bassline.conflict 2026-09-23 1405.wav`). A Mass-Delete Guard stops any run that would delete more than half of an item until you decide. |
 | **Pause Rules** | Studio Mode pauses syncing while Logic Pro, Ableton Live, REAPER, Cubase and other listed apps run. Syncing also pauses on battery or Low Power Mode, on metered networks, and above a CPU threshold. Upload and download bandwidth limits apply to every sync. Manual pause for one hour, until tomorrow morning, or until you resume. |
 | **Sharing** | For Nextcloud and ownCloud: public links with password, expiry, permissions, hidden download, label and note; internal links; user, group and email shares; list, edit and delete every share. Server policies such as enforced passwords are shown and honoured. Other providers get public links through rclone, tracked in a local registry. |
@@ -44,6 +44,28 @@ Everything heavy runs in a small background service built on rclone, so closing 
 | **Activity Log** | Every error, action and sync run with its file list, kept in SQLite for 30 days or 50 MB. Search, filter by level and category, and export as JSON or CSV. |
 
 The interface is available in English and German and follows the system language.
+
+## Supported clouds
+
+CloudWire embeds rclone v1.75.0, so it speaks to the same 50+ storage systems and 50+ S3-compatible services as rclone itself.
+
+| Kind | Services |
+| --- | --- |
+| **Personal and team clouds** | Nextcloud, ownCloud, Google Drive, Google Photos, Microsoft OneDrive and SharePoint, Dropbox, iCloud Drive, Box, pCloud, Proton Drive, Mega, Koofr, Jottacloud, HiDrive, Yandex Disk, Mail.ru Cloud, Zoho WorkDrive, Internxt, Filen, PikPak, Seafile, Citrix ShareFile, Files.com, Enterprise File Fabric, Quatrix, OpenDrive, put.io, premiumize.me, 1Fichier, Gofile, Linkbox, Uloz.to, Pixeldrain, SugarSync |
+| **Object storage** | Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, Google Cloud Storage, Microsoft Azure Blob Storage and Azure Files, Oracle Cloud Object Storage, OpenStack Swift, IDrive e2, Hetzner, OVHcloud, IONOS, Scaleway, DigitalOcean Spaces, Linode, Storj, MinIO, Ceph, SeaweedFS, Synology C2, Alibaba OSS, Tencent COS, Huawei OBS, Qiniu, QingStor and any other S3-compatible service |
+| **Protocols and self-hosted** | WebDAV, SFTP/SSH, FTP, SMB/CIFS, HTTP (read-only), Hadoop HDFS, Sia, Akamai NetStorage |
+
+What works where:
+
+| Feature | Availability |
+| --- | --- |
+| Mounts, Offline Items, Vaults, Pause Rules, Activity Log | Every cloud above |
+| Nextcloud browser login (Login Flow v2) | Nextcloud |
+| Full sharing: public links with password and expiry, internal links, user, group and email shares, manage all shares | Nextcloud and ownCloud |
+| Public links | Clouds where rclone can create links, for example Google Drive, OneDrive, Dropbox, Box, pCloud, Mega, Koofr, Jottacloud and Backblaze B2 |
+| Browser sign-in (OAuth) | Google Drive, OneDrive, Dropbox, Box, pCloud and the other OAuth providers |
+
+CloudWire is tested end to end against Nextcloud. The other providers use the same rclone backends as the `rclone` command line tool; if something does not work with your cloud, please [open an issue](https://github.com/DonMikone/CloudWire/issues).
 
 ## Screenshots
 
@@ -134,6 +156,12 @@ Design decisions are recorded in [`docs/adr`](docs/adr), and the project vocabul
 - **Your data stays yours.** Removing an Offline Item or a Vault never touches the cloud copy. Deleting the original of an encrypted folder requires a verified copy and your confirmation.
 
 ## Troubleshooting and FAQ
+
+**Which clouds does CloudWire support?**
+Every cloud supported by rclone, including Nextcloud, ownCloud, Google Drive, OneDrive, Dropbox, iCloud Drive, Box, pCloud, Proton Drive, Amazon S3, Backblaze B2, Wasabi, WebDAV, SFTP and SMB. See [Supported clouds](#supported-clouds) for the full list and which features each one gets.
+
+**How is CloudWire different from the Nextcloud desktop client, Mountain Duck or rclone mount?**
+Virtual-file and mount clients keep your files behind a placeholder or a cache that the system manages. CloudWire does both jobs separately: Mounts stream the whole cloud, and Offline Items keep chosen folders as plain local files at SSD speed with background two-way sync, on a drive you choose. On top of that it adds Finder sharing, Vaults and Pause Rules, and it is free and open source under the MIT License.
 
 **Do I need FUSE?**
 No. Mounts use the NFS client built into macOS and need no installation or root rights. If [FUSE-T](https://github.com/macos-fuse-t/fuse-t/releases) or macFUSE is installed, you can switch individual Mounts to FUSE in the Mount editor.
