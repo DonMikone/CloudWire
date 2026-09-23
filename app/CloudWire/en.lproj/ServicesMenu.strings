@@ -1,0 +1,4 @@
+/* Services menu titles (NSServices in Info.plist). */
+"Share with CloudWire" = "Share with CloudWire";
+"Copy CloudWire Link" = "Copy CloudWire Link";
+"Make Available Offline" = "Make Available Offline";

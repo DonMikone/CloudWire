@@ -1,0 +1,155 @@
+name: CloudWire
+
+options:
+  bundleIdPrefix: io.github.donmikone
+  developmentLanguage: en
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  # Linked statically into the App and the Finder extension: an embedded dynamic
+  # framework fails library validation under the hardened runtime with ad-hoc
+  # signatures (no Team ID).
+  CloudWireKit:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: CloudWireKit
+    settings:
+      base:
+        PRODUCT_NAME: CloudWireKit
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+
+  CloudWire:
+    type: application
+    platform: macOS
+    sources:
+      - path: CloudWire
+        excludes:
+          - "Info.plist"
+          - "*.entitlements"
+          - "io.github.donmikone.cloudwire.core.plist"
+      - path: CloudWire/io.github.donmikone.cloudwire.core.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
+      - path: ../build/core/cloudwire-core
+        optional: true
+        buildPhase:
+          copyFiles:
+            destination: executables
+    dependencies:
+      - target: CloudWireKit
+      - target: CloudWireFinder
+    settings:
+      base:
+        PRODUCT_NAME: CloudWire
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.donmikone.cloudwire
+        INFOPLIST_FILE: CloudWire/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CloudWire/CloudWire.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/../Frameworks"]
+        COMBINE_HIDPI_IMAGES: YES
+    postBuildScripts:
+      - name: Sign cloudwire-core
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
+        script: |
+          set -euo pipefail
+          CORE="$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/cloudwire-core"
+          if [ ! -f "$CORE" ]; then
+            echo "error: $CORE is missing. Build the Core first: scripts/build-core.sh debug native" >&2
+            exit 1
+          fi
+          # Ad-hoc builds use the identity "-"; an empty identity (signing disabled) also falls back to ad-hoc.
+          IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-}"
+          if [ -z "$IDENTITY" ]; then
+            IDENTITY="-"
+          fi
+          codesign --force --sign "$IDENTITY" --options runtime \
+            --entitlements "$SRCROOT/CloudWire/Core.entitlements" "$CORE"
+
+  CloudWireFinder:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: CloudWireFinder
+        excludes:
+          - "Info.plist"
+          - "*.entitlements"
+      - path: CloudWire/Localizable.xcstrings
+    dependencies:
+      - target: CloudWireKit
+    settings:
+      base:
+        PRODUCT_NAME: CloudWireFinder
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.donmikone.cloudwire.finder
+        INFOPLIST_FILE: CloudWireFinder/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CloudWireFinder/CloudWireFinder.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks"]
+
+  CloudWireKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: CloudWireKitTests
+    dependencies:
+      - target: CloudWireKit
+    settings:
+      base:
+        PRODUCT_NAME: CloudWireKitTests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.donmikone.cloudwire.kittests
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: NO
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@loader_path/../Frameworks", "@executable_path/../Frameworks"]
+
+schemes:
+  CloudWire:
+    build:
+      targets:
+        CloudWire: all
+        CloudWireFinder: all
+        CloudWireKit: all
+    run:
+      config: Debug
+      executable: CloudWire
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  CloudWireKitTests:
+    build:
+      targets:
+        CloudWireKit: [test]
+        CloudWireKitTests: [test]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: CloudWireKitTests
