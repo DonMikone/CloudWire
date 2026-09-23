@@ -5,26 +5,13 @@ struct MainWindow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
-    @State private var suppressed = false
 
     var body: some View {
         MainWindowContent()
             .frame(minWidth: 900, minHeight: 600)
-            .background(WindowAccessor { window in
-                suppressed = !WindowRouter.shared.mainWindowAttached(window)
-                if !suppressed {
-                    WindowRouter.shared.windowAppeared(WindowRouter.mainID)
-                }
-            })
+            .background(WindowAccessor { WindowRouter.shared.mainWindowAttached($0) })
             .onAppear {
                 WindowRouter.shared.capture(openWindow: openWindow, openSettings: openSettings)
-            }
-            .onDisappear {
-                if suppressed {
-                    suppressed = false
-                } else {
-                    WindowRouter.shared.windowDisappeared(WindowRouter.mainID)
-                }
             }
     }
 }
@@ -89,12 +76,20 @@ struct MainWindowContent: View {
     private var snapshotSidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(SidebarSection.allCases) { section in
-                Label(section.title, systemImage: section.symbol)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(section == model.selection ? Color.accentColor.opacity(0.25) : .clear,
-                                in: RoundedRectangle(cornerRadius: 6))
+                HStack {
+                    Label(section.title, systemImage: section.symbol)
+                    Spacer()
+                    if badge(for: section) > 0 {
+                        Text(badge(for: section), format: .number)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(section == model.selection ? Color.accentColor.opacity(0.25) : .clear,
+                            in: RoundedRectangle(cornerRadius: 6))
             }
             Spacer()
         }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/DonMikone/CloudWire/core/internal/paths"
@@ -15,6 +17,43 @@ import (
 
 // MaxDeletePercent is the Mass-Delete Guard threshold.
 const MaxDeletePercent = 50
+
+// MassDeleteInfo describes why the Mass-Delete Guard stopped an item.
+type MassDeleteInfo struct {
+	Reason  string `json:"reason"` // tooManyDeletes | allChanged
+	Side    string `json:"side"`   // local | cloud
+	Deletes int    `json:"deletes"`
+	Total   int    `json:"total"`
+}
+
+var (
+	tooManyDeletesRe = regexp.MustCompile(`too many deletes \(>\d+%, (\d+) of (\d+)\) on (Path[12])\b`)
+	allChangedRe     = regexp.MustCompile(`all files were changed on (Path[12])\b`)
+)
+
+// ParseMassDelete reads the safety abort rclone bisync logs before it stops
+// (cmd/bisync deltas.go excessDeletes, operations.go). Path1 is the Storage
+// Location, Path2 the cloud (see BisyncParams). nil for any other text.
+func ParseMassDelete(text string) *MassDeleteInfo {
+	side := func(p string) string {
+		if p == "Path1" {
+			return "local"
+		}
+		return "cloud"
+	}
+	if m := tooManyDeletesRe.FindStringSubmatch(text); m != nil {
+		deletes, err1 := strconv.Atoi(m[1])
+		total, err2 := strconv.Atoi(m[2])
+		if err1 != nil || err2 != nil {
+			return nil
+		}
+		return &MassDeleteInfo{Reason: "tooManyDeletes", Side: side(m[3]), Deletes: deletes, Total: total}
+	}
+	if m := allChangedRe.FindStringSubmatch(text); m != nil {
+		return &MassDeleteInfo{Reason: "allChanged", Side: side(m[1])}
+	}
+	return nil
+}
 
 // ConflictSuffix returns bisync's conflictSuffix. Path1 (local) always wins
 // and keeps its name; the cloud version is saved as
@@ -147,8 +186,8 @@ func Excluded(rel string, excludes []string) bool {
 	return false
 }
 
-// itemName is a short display name.
-func itemName(it store.OfflineItem) string {
+// ItemName is the short display name of an Offline Item, as shown in the app.
+func ItemName(it store.OfflineItem) string {
 	if it.Kind == "files" && len(it.Files) == 1 {
 		return it.Files[0]
 	}

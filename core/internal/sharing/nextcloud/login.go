@@ -30,6 +30,14 @@ type Credentials struct {
 // ErrLoginTimeout is returned when the user did not finish the login in time.
 var ErrLoginTimeout = errors.New("timeout")
 
+// NoLoginFlowError is returned when the server does not offer Login Flow v2,
+// usually because the address is not a Nextcloud server.
+type NoLoginFlowError struct{ Status int }
+
+func (e NoLoginFlowError) Error() string {
+	return fmt.Sprintf("login flow not available (HTTP %d) - is this a Nextcloud server?", e.Status)
+}
+
 // sameHostOrHTTPS accepts https URLs, and http URLs on the server's host when
 // the server itself was entered as http. For an https server, a same-host http
 // URL (a proxy without overwriteprotocol) is upgraded to https: credentials
@@ -79,7 +87,7 @@ func StartLogin(ctx context.Context, hc *http.Client, serverURL string) (Flow, e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Flow{}, fmt.Errorf("login flow not available (HTTP %d) - is this a Nextcloud server?", resp.StatusCode)
+		return Flow{}, NoLoginFlowError{Status: resp.StatusCode}
 	}
 	var d struct {
 		Poll struct {

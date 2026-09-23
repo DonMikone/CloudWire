@@ -39,8 +39,7 @@ enum ActionHandler {
     private static func run(_ action: ActionURL) async {
         let model = AppModel.shared
         guard await model.waitUntilConnected() else {
-            model.present(CoreError.notConnected())
-            WindowRouter.shared.showMain(section: .overview)
+            showInMain(CoreError.notConnected(), section: .overview)
             return
         }
         let client = model.client
@@ -105,16 +104,20 @@ enum ActionHandler {
                 if let url = URL(string: web) { NSWorkspace.shared.open(url) }
             }
         } catch {
-            model.present(error)
-            WindowRouter.shared.showMain()
+            showInMain(error)
         }
     }
 
     // MARK: Helpers
 
     private static func reject(_ message: String) {
-        AppModel.shared.present(CoreError(code: "client.selection", message: message))
-        WindowRouter.shared.showMain()
+        showInMain(CoreError(code: "client.selection", message: message))
+    }
+
+    /// Opens the main window with the error as its alert (the URL action has no window of its own).
+    private static func showInMain(_ error: any Error, section: SidebarSection? = nil) {
+        AppModel.shared.alert = ErrorText.alert(for: error)
+        WindowRouter.shared.showMain(section: section)
     }
 
     private static func confirm(_ action: ActionURL) -> Bool {
@@ -122,20 +125,23 @@ enum ActionHandler {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = String(localized: "Allow this action?")
-        let names = action.paths.map { CorePaths.abbreviate($0) }.joined(separator: "\n")
-        let what: String
-        switch action.name {
-        case .copyPublicLink: what = String(localized: "create a public link")
-        case .makeOffline: what = String(localized: "make items available offline")
-        case .removeOffline: what = String(localized: "remove an Offline Item")
-        case .encrypt: what = String(localized: "encrypt items into a Vault")
-        default: what = action.name.rawValue
-        }
-        alert.informativeText = String(
-            localized: "Another app asked CloudWire to \(what) for:\n\n\(names)\n\nContinue only if you started this yourself.")
+        alert.informativeText = confirmationMessage(action.name, paths: action.paths)
         alert.addButton(withTitle: String(localized: "Continue"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// One full sentence per action (sentence fragments cannot be localised cleanly), then the paths.
+    static func confirmationMessage(_ name: ActionURL.Name, paths: [String]) -> String {
+        let request = switch name {
+        case .copyPublicLink: String(localized: "Another app asked CloudWire to create a public link for these items:")
+        case .makeOffline: String(localized: "Another app asked CloudWire to make these items available offline:")
+        case .removeOffline: String(localized: "Another app asked CloudWire to remove this Offline Item:")
+        case .encrypt: String(localized: "Another app asked CloudWire to encrypt these items into a Vault:")
+        default: String(localized: "Another app asked CloudWire to run “\(name.rawValue)” for these items:")
+        }
+        let names = paths.map { CorePaths.abbreviate($0) }.joined(separator: "\n")
+        return [request, names, String(localized: "Continue only if you started this yourself.")].joined(separator: "\n\n")
     }
 
     /// Paths the Finder extension marked as folders (no stat needed inside Mounts).

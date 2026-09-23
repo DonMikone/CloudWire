@@ -89,7 +89,7 @@ type Msg struct {
 	ETA        *float64        `json:"eta,omitempty"`
 	VFS        json.RawMessage `json:"vfs,omitempty"`
 	Status     string          `json:"status,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	Error      string          `json:"error,omitempty"` // result: failure; mounted: warning
 	Stats      json.RawMessage `json:"stats,omitempty"`
 	Mismatches []string        `json:"mismatches,omitempty"`
 	// Files are the verified source files of a Vault migration, relative to

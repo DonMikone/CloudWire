@@ -18,6 +18,8 @@ struct OptionFieldRow: View {
     @Binding var form: OptionFormModel
     let option: RcloneOption
     var showsName = false
+    /// Lines of help text shown below the field; `nil` shows all of it.
+    var detailsLineLimit: Int? = 4
 
     private var text: Binding<String> {
         Binding(get: { form.text(for: option) }, set: { form.setText($0, for: option) })
@@ -27,10 +29,11 @@ struct OptionFieldRow: View {
         VStack(alignment: .leading, spacing: 4) {
             field
             if !option.details.isEmpty || showsName {
-                Text(showsName ? "\(option.name) · \(option.details)" : option.details)
+                Text(showsName ? [option.name, option.details].filter { !$0.isEmpty }.joined(separator: " · ")
+                               : option.details)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(4)
+                    .lineLimit(detailsLineLimit)
                     .textSelection(.enabled)
             }
             if let error = form.validationError(for: option), !(error.reason == .required && text.wrappedValue.isEmpty) {
@@ -86,7 +89,10 @@ struct OptionFieldRow: View {
                             Image(systemName: "chevron.down")
                         }
                         .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
                         .fixedSize()
+                        .help(Text("Suggestions"))
+                        .accessibilityLabel(Text("Suggestions"))
                     }
                 } label: { label }
             }

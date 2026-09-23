@@ -137,6 +137,103 @@ func TestLoginFlowCreatesRemoteFromUserID(t *testing.T) {
 	}
 }
 
+func TestLoginFlowRenewsExistingConnectionForSameAccountOnly(t *testing.T) {
+	var mu sync.Mutex
+	login, pass, uid := "mike@example.com", "app-pass", "mike"
+	var revoked []string
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		u, p, _ := r.BasicAuth()
+		switch r.URL.Path {
+		case "/index.php/login/v2":
+			fmt.Fprintf(w, `{"poll":{"token":"tok","endpoint":"%s/login/v2/poll"},"login":"%s/login/v2/flow/x"}`, srv.URL, srv.URL)
+		case "/login/v2/poll":
+			fmt.Fprintf(w, `{"server":"%s","loginName":"%s","appPassword":"%s"}`, srv.URL, login, pass)
+		case "/ocs/v1.php/cloud/user":
+			if u != login || p != pass {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprintf(w, `{"ocs":{"meta":{"statuscode":100},"data":{"id":"%s"}}}`, uid)
+		case "/ocs/v2.php/core/apppassword":
+			revoked = append(revoked, p)
+			fmt.Fprint(w, `{"ocs":{"meta":{"statuscode":200},"data":[]}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	LoginPollInterval = 5 * time.Millisecond
+	s, ev := newService(t)
+	flow := func(p LoginStartParams) map[string]any {
+		t.Helper()
+		ev.mu.Lock()
+		ev.evs = nil
+		ev.mu.Unlock()
+		if _, err := s.NextcloudLoginStart(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+		return ev.wait(t)
+	}
+	set := func(l, p, u string) {
+		mu.Lock()
+		login, pass, uid = l, p, u
+		mu.Unlock()
+	}
+	revokedPasswords := func() []string {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			mu.Lock()
+			got := append([]string(nil), revoked...)
+			mu.Unlock()
+			if len(got) > 0 {
+				return got
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return nil
+	}
+
+	created := flow(LoginStartParams{ServerURL: srv.URL, Name: "Studio Cloud"})
+	id, _ := created["connectionId"].(string)
+	c, err := s.Get(id)
+	if err != nil {
+		t.Fatalf("create: %v %v", created, err)
+	}
+	before, _ := s.Config(c)
+
+	set("mike@example.com", "app-pass-2", "mike")
+	if got := flow(LoginStartParams{ConnectionID: id}); got["status"] != "ok" || got["connectionId"] != id {
+		t.Fatalf("renew event %v", got)
+	}
+	after, _ := s.Config(c)
+	if after["url"] != before["url"] || after["pass"] == before["pass"] || after["pass"] == "app-pass-2" {
+		t.Fatalf("renewal must keep the URL and store the new password obscured: %v -> %v", before, after)
+	}
+	if got := revokedPasswords(); len(got) != 1 || got[0] != "app-pass" {
+		t.Fatalf("the old app password must be revoked, got %v", got)
+	}
+	if cs, _ := s.List(); len(cs) != 1 {
+		t.Fatalf("renewal must not add a Connection: %+v", cs)
+	}
+
+	mu.Lock()
+	revoked = nil
+	mu.Unlock()
+	set("anna@example.com", "app-pass-3", "anna")
+	if got := flow(LoginStartParams{ConnectionID: id}); got["status"] != "error" || got["errorCode"] != "connection.otherAccount" {
+		t.Fatalf("another account must be rejected: %v", got)
+	}
+	if kept, _ := s.Config(c); kept["pass"] != after["pass"] || kept["user"] != "mike@example.com" {
+		t.Fatalf("a rejected login changed the Connection: %v", kept)
+	}
+	if got := revokedPasswords(); len(got) != 1 || got[0] != "app-pass-3" {
+		t.Fatalf("the unused app password must be revoked, got %v", got)
+	}
+}
+
 func TestManualLoginFailureLeavesNothingBehind(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -159,9 +256,9 @@ func TestNameValidation(t *testing.T) {
 		t.Fatalf("create local: %+v %v", step, err)
 	}
 	for name, code := range map[string]string{
-		"disk":      "connection.nameTaken",
-		"Laufwerke": "connection.nameReserved",
-		"a/b":       "connection.nameReserved",
+		"disk":   "connection.nameTaken",
+		"Mounts": "connection.nameReserved",
+		"a/b":    "connection.nameReserved",
 	} {
 		if _, err := s.Create(context.Background(), CreateParams{Name: name, Provider: "local"}); appCode(err) != code {
 			t.Errorf("%q: got %v, want %s", name, err, code)

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
 
@@ -43,17 +44,17 @@ func (l *Logger) Enabled(level string) bool {
 }
 
 // Log records an entry. details may be nil.
-func (l *Logger) Log(level, category, subjectID, message string, details any) {
+func (l *Logger) Log(level, category, subjectID string, t msg.Text, details any) {
 	switch level {
 	case "error":
-		slog.Error(message, "category", category, "subject", subjectID)
+		slog.Error(t.Message, "category", category, "subject", subjectID)
 	case "warn":
-		slog.Warn(message, "category", category, "subject", subjectID)
+		slog.Warn(t.Message, "category", category, "subject", subjectID)
 	}
 	if !l.Enabled(level) {
 		return
 	}
-	a, err := l.st.AppendActivity(level, category, subjectID, message, details)
+	a, err := l.st.AppendActivity(level, category, subjectID, t, details)
 	if err != nil {
 		slog.Error("activity append", "err", err)
 		return
@@ -64,21 +65,21 @@ func (l *Logger) Log(level, category, subjectID, message string, details any) {
 }
 
 // Debug records a debug entry.
-func (l *Logger) Debug(category, subjectID, message string, details any) {
-	l.Log("debug", category, subjectID, message, details)
+func (l *Logger) Debug(category, subjectID string, t msg.Text, details any) {
+	l.Log("debug", category, subjectID, t, details)
 }
 
 // Info records an info entry.
-func (l *Logger) Info(category, subjectID, message string, details any) {
-	l.Log("info", category, subjectID, message, details)
+func (l *Logger) Info(category, subjectID string, t msg.Text, details any) {
+	l.Log("info", category, subjectID, t, details)
 }
 
 // Warn records a warning.
-func (l *Logger) Warn(category, subjectID, message string, details any) {
-	l.Log("warn", category, subjectID, message, details)
+func (l *Logger) Warn(category, subjectID string, t msg.Text, details any) {
+	l.Log("warn", category, subjectID, t, details)
 }
 
 // Error records an error.
-func (l *Logger) Error(category, subjectID, message string, details any) {
-	l.Log("error", category, subjectID, message, details)
+func (l *Logger) Error(category, subjectID string, t msg.Text, details any) {
+	l.Log("error", category, subjectID, t, details)
 }

@@ -3,6 +3,8 @@ import SwiftUI
 
 struct OverviewView: View {
     @Environment(AppModel.self) private var model
+    /// Ids of Recent Problems the user hid, comma-separated.
+    @AppStorage("hiddenProblems") private var hiddenProblems = ""
 
     private let columns = [GridItem(.adaptive(minimum: 250), spacing: 14)]
 
@@ -16,6 +18,21 @@ struct OverviewView: View {
                     .padding(.bottom, 20)
             }
         }
+    }
+
+    /// Recent Problems without those the user hid or whose element is healthy again.
+    private var visibleProblems: [ActivityEntry] {
+        let hidden = Set(hiddenProblems.split(separator: ",").compactMap { Int64($0) })
+        return model.recentProblems.filter {
+            !hidden.contains($0.id) && !$0.isResolved(mounts: model.mounts, offlineItems: model.offlineItems)
+        }
+    }
+
+    private func hide(_ entry: ActivityEntry) {
+        // Only ids that can still appear are kept, so the list stays short.
+        let current = Set(model.recentProblems.map(\.id))
+        let hidden = Set(hiddenProblems.split(separator: ",").compactMap { Int64($0) }).intersection(current)
+        hiddenProblems = hidden.union([entry.id]).sorted().map(String.init).joined(separator: ",")
     }
 
     private var content: some View {
@@ -32,7 +49,8 @@ struct OverviewView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Problems").font(.headline)
-                    if model.recentProblems.isEmpty {
+                    let problems = Array(visibleProblems.prefix(6))
+                    if problems.isEmpty {
                         Card {
                             Label("No errors or warnings. Everything is running smoothly.",
                                   systemImage: "checkmark.seal")
@@ -41,9 +59,9 @@ struct OverviewView: View {
                     } else {
                         Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                ForEach(model.recentProblems.prefix(6)) { entry in
-                                    ProblemRow(entry: entry)
-                                    if entry.id != model.recentProblems.prefix(6).last?.id { Divider() }
+                                ForEach(problems) { entry in
+                                    ProblemRow(entry: entry) { hide(entry) }
+                                    if entry.id != problems.last?.id { Divider() }
                                 }
                                 Button("Show Activity Log") { model.selection = .activity }
                                     .buttonStyle(.link)
@@ -117,7 +135,6 @@ struct OverviewView: View {
                 Label("Sync", systemImage: "pause.circle").font(.headline)
                 PauseSummary()
                 PauseControls()
-                    .fixedSize()
             }
         }
     }
@@ -138,17 +155,35 @@ struct OverviewView: View {
 
 struct ProblemRow: View {
     let entry: ActivityEntry
+    var onHide: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: entry.level == .error ? "exclamationmark.circle.fill" : "exclamationmark.triangle.fill")
                 .foregroundStyle(entry.level.color)
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.message).lineLimit(2)
+                let parts = entry.text.parts()
+                Text(parts.text).lineLimit(2)
+                if let detail = parts.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 Text("\(entry.category.label) · \(Format.relative(ms: entry.ts))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let onHide {
+                Spacer(minLength: 0)
+                Button("Hide", action: onHide)
+                    .buttonStyle(.borderless)
+                    .font(.callout)
+            }
+        }
+        .contextMenu {
+            if let onHide { Button("Hide", action: onHide) }
         }
     }
 }
@@ -170,9 +205,7 @@ struct PauseSummary: View {
                     }
                 }
                 ForEach(pause.activeRules) { rule in
-                    StatusLabel(text: rule.detail.isEmpty ? PauseReason.label(rule.id)
-                                : "\(PauseReason.label(rule.id)): \(rule.detail)",
-                                color: .orange)
+                    StatusLabel(text: rule.text.localized(), color: .orange)
                 }
             } else {
                 StatusLabel(text: String(localized: "Syncing is active"), color: .green)
@@ -182,43 +215,65 @@ struct PauseSummary: View {
 }
 
 /// Classic pause/play controls for syncing. The pause button pauses until resumed; its arrow
-/// offers 1 hour or until tomorrow 08:00. While paused manually, a play button resumes. While
+/// offers 1 hour or until tomorrow morning. While paused manually, a play button resumes. While
 /// Pause Rules hold syncing, a play button starts a sync right away (background priority and
-/// bandwidth limit still apply).
+/// bandwidth limit still apply). Stacks vertically when the row does not fit.
 struct PauseControls: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        HStack(spacing: 8) {
-            if model.pause?.manualUntil != nil {
-                Button { model.resumeSync() } label: {
-                    Label("Resume", systemImage: "play.fill")
-                }
-                .help("Resume syncing")
-            } else {
-                Menu {
-                    Button("For 1 Hour") { model.pause(until: Date().addingTimeInterval(3600)) }
-                    Button("Until Tomorrow 08:00") { model.pause(until: Self.tomorrowMorning()) }
-                    Button("Until I Resume") { model.pause(until: nil) }
-                } label: {
-                    Label("Pause", systemImage: "pause.fill")
-                } primaryAction: {
-                    model.pause(until: nil)
-                }
-                .help("Pause syncing until you resume. The arrow offers 1 hour or until tomorrow 08:00.")
-                if !(model.pause?.activeRules.isEmpty ?? true) {
-                    Button { model.syncNow() } label: {
-                        Label("Sync Now", systemImage: "play.fill")
-                    }
-                    .help("Sync now despite the active Pause Rules")
-                }
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { controls }.fixedSize()
+            VStack(alignment: .leading, spacing: 8) { controls }.fixedSize()
         }
         .labelStyle(.titleAndIcon)
+    }
+
+    @ViewBuilder
+    private var controls: some View {
+        if model.pause?.manualUntil != nil {
+            Button { model.resumeSync() } label: {
+                Label("Resume", systemImage: "play.fill")
+            }
+            .help("Resume syncing")
+        } else {
+            Menu {
+                Button("For 1 Hour") { model.pause(until: Date().addingTimeInterval(3600)) }
+                Button(Self.tomorrowMorningTitle()) { model.pause(until: Self.tomorrowMorning()) }
+                Button("Until I Resume") { model.pause(until: nil) }
+            } label: {
+                Label("Pause", systemImage: "pause.fill")
+            } primaryAction: {
+                model.pause(until: nil)
+            }
+            .help(Text("Pause syncing until you resume. The arrow offers 1 hour or until tomorrow \(Self.tomorrowMorningTime())."))
+            if Self.offersSyncNow(model.pause) {
+                Button { model.syncNow() } label: {
+                    Label("Sync Now", systemImage: "play.fill")
+                }
+                .help("Sync now despite the active Pause Rules")
+            }
+        }
+    }
+
+    /// Whether the controls show their own "Sync Now" button: while Pause Rules hold syncing and
+    /// the user has not paused manually.
+    static func offersSyncNow(_ pause: PauseStatus?) -> Bool {
+        guard let pause, pause.manualUntil == nil else { return false }
+        return !pause.activeRules.isEmpty
     }
 
     static func tomorrowMorning(now: Date = Date(), calendar: Calendar = .current) -> Date {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
         return calendar.date(bySettingHour: 8, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+    }
+
+    /// "Until Tomorrow 08:00" in the user's time format.
+    static func tomorrowMorningTitle() -> String {
+        String(localized: "Until Tomorrow \(tomorrowMorningTime())")
+    }
+
+    private static func tomorrowMorningTime() -> String {
+        tomorrowMorning().formatted(date: .omitted, time: .shortened)
     }
 }

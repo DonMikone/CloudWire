@@ -96,6 +96,11 @@ struct CoreUnavailableView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        state.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var state: some View {
         switch model.coreState {
         case .needsApproval:
             ContentUnavailableView {
@@ -110,13 +115,19 @@ struct CoreUnavailableView: View {
             ContentUnavailableView {
                 Label("Background Service Not Reachable", systemImage: "bolt.horizontal.circle")
             } description: {
-                Text(message)
+                VStack(spacing: 6) {
+                    Text("The background service could not be started.")
+                    Text("CloudWire tries again automatically.")
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             } actions: {
                 Button("Try Again") { model.retryStart() }
             }
         default:
-            ProgressView("Starting CloudWire…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ProgressView("Starting the background service…")
         }
     }
 }
@@ -175,6 +186,7 @@ struct FolderField: View {
                 TextField(title, text: $path, prompt: Text(placeholder))
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.leading)
                 Button("Choose…") {
                     if let chosen = Panels.chooseFolder(message: message, startingAt: path.isEmpty ? placeholder : path) {
                         path = chosen
@@ -189,15 +201,16 @@ struct FolderField: View {
 struct PasswordField: View {
     let title: LocalizedStringKey
     @Binding var text: String
+    var prompt: Text? = nil
     @State private var revealed = false
 
     var body: some View {
         HStack {
             Group {
                 if revealed {
-                    TextField(title, text: $text)
+                    TextField(title, text: $text, prompt: prompt)
                 } else {
-                    SecureField(title, text: $text)
+                    SecureField(title, text: $text, prompt: prompt)
                 }
             }
             .textFieldStyle(.roundedBorder)
@@ -212,14 +225,49 @@ struct PasswordField: View {
     }
 }
 
-/// Inline error text.
+/// Inline error text. `detail` is raw rclone or OS text, shown small and selectable below.
 struct InlineError: View {
     let message: String
+    let detail: String?
+
+    init(message: String, detail: String? = nil) {
+        self.message = message
+        self.detail = detail
+    }
+
+    /// A Core text: its sentence, with the raw detail below. A text that is only rclone's raw reason gets
+    /// `rawHeadline` as its sentence.
+    init(_ text: CoreText, rawHeadline: String? = nil) {
+        let parts = text.parts(rawHeadline: rawHeadline)
+        self.init(message: parts.text, detail: parts.detail)
+    }
 
     var body: some View {
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.red)
-            .font(.callout)
+        VStack(alignment: .leading, spacing: 2) {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail {
+                DetailText(detail)
+            }
+        }
+    }
+}
+
+/// Raw rclone or OS text: untranslated, so it stays small and selectable for copying into a search or report.
+struct DetailText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -254,11 +302,30 @@ extension View {
 
 private struct ModelAlert: ViewModifier {
     @Bindable var model: AppModel
+    @Environment(\.controlActiveState) private var activeState
+    /// The alert this window shows: only the window that is key when an alert arrives shows it, so
+    /// it does not appear in several windows at once.
+    @State private var shown: AlertContent?
 
     func body(content: Content) -> some View {
-        content.alert(item: $model.alert) { alert in
-            Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
-        }
+        content
+            .alert(item: Binding(get: { shown }, set: { alert in
+                shown = alert
+                if alert == nil { model.alert = nil }
+            })) { alert in
+                Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
+            }
+            .onChange(of: model.alert?.id, initial: true) {
+                if model.alert == nil {
+                    shown = nil
+                } else if activeState == .key {
+                    shown = model.alert
+                }
+            }
+            .onChange(of: activeState) {
+                // An alert that arrived while no window was key shows in the next key window.
+                if activeState == .key, shown == nil, let alert = model.alert { shown = alert }
+            }
     }
 }
 
@@ -267,4 +334,38 @@ private struct ModelAlert: ViewModifier {
 func copyToPasteboard(_ text: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
+}
+
+/// A native search field (magnifier, clear button) that updates `text` on every keystroke.
+struct SearchField: NSViewRepresentable {
+    let prompt: String
+    @Binding var text: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.sendsSearchStringImmediately = true
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.searchChanged(_:))
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        field.placeholderString = prompt
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+
+        /// Fires on every keystroke (`sendsSearchStringImmediately`) and on the clear button.
+        @objc func searchChanged(_ sender: NSSearchField) {
+            text.wrappedValue = sender.stringValue
+        }
+    }
 }

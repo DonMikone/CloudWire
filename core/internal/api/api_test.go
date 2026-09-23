@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 )
 
 func startServer(t *testing.T) (*Server, string) {
@@ -27,7 +29,10 @@ func startServer(t *testing.T) (*Server, string) {
 		return map[string]string{"hello": p.Name}, nil
 	}))
 	s.Handle("test.fail", NoParams(func(context.Context) (any, error) {
-		return nil, Errorf("mount.pointInUse", "busy").WithData("mountPoint", "/x")
+		return nil, Fail("mount.pointInUse", msg.New("mount.pointInUse", "path", "/x")).WithData("mountPoint", "/x")
+	}))
+	s.Handle("test.invalid", NoParams(func(context.Context) (any, error) {
+		return nil, InvalidText(msg.New("vault.invalidName", "name", "a/b"))
 	}))
 	s.Handle("test.slow", NoParams(func(context.Context) (any, error) {
 		time.Sleep(150 * time.Millisecond)
@@ -118,8 +123,18 @@ func TestErrors(t *testing.T) {
 	c.send(t, `{"jsonrpc":"2.0","id":3,"method":"test.fail"}`+"\n")
 	e := c.recv(t)["error"].(map[string]any)
 	data := e["data"].(map[string]any)
-	if e["code"].(float64) != CodeApplication || data["code"] != "mount.pointInUse" || data["mountPoint"] != "/x" || data["message"] != "busy" {
+	params, _ := data["params"].(map[string]any)
+	if e["code"].(float64) != CodeApplication || data["code"] != "mount.pointInUse" || data["mountPoint"] != "/x" ||
+		data["message"] != "Another Mount already uses /x" || data["key"] != "mount.pointInUse" || params["path"] != "/x" {
 		t.Fatalf("application error: %v", e)
+	}
+	// Parameter errors a user can cause carry a text as well.
+	c.send(t, `{"jsonrpc":"2.0","id":4,"method":"test.invalid"}`+"\n")
+	e = c.recv(t)["error"].(map[string]any)
+	data, _ = e["data"].(map[string]any)
+	if e["code"].(float64) != CodeInvalidParams || data["key"] != "vault.invalidName" ||
+		data["message"] != `"a/b" cannot be used as a Vault name` {
+		t.Fatalf("invalid params with text: %v", e)
 	}
 	c.send(t, "garbage\n")
 	if e := c.recv(t)["error"].(map[string]any); e["code"].(float64) != CodeParseError {

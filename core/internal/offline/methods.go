@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
@@ -25,7 +26,7 @@ import (
 func (e *Engine) Get(id string) (store.OfflineItem, error) {
 	it, err := e.st.OfflineItem(id)
 	if errors.Is(err, store.ErrNotFound) {
-		return it, api.Errorf("offline.notFound", "Offline Item %s not found", id)
+		return it, api.Fail("offline.notFound", msg.New("offline.notFound", "id", id))
 	}
 	return it, err
 }
@@ -80,7 +81,7 @@ func (e *Engine) Preflight(ctx context.Context, p PreflightParams) (PreflightRes
 		return PreflightResult{}, err
 	}
 	if e.Vaults != nil && e.Vaults.IsLocked(conn.ID) {
-		return PreflightResult{}, api.Errorf("offline.vaultLocked", "Unlock the Vault first")
+		return PreflightResult{}, api.Fail("offline.vaultLocked", msg.New("vault.unlockFirst"))
 	}
 	remotePath := strings.Trim(p.RemotePath, "/")
 	sp, err := e.resolveStorage(conn, remotePath, p.StoragePath)
@@ -90,7 +91,7 @@ func (e *Engine) Preflight(ctx context.Context, p PreflightParams) (PreflightRes
 	res := PreflightResult{StoragePath: sp}
 	res.RemoteBytes, err = remoteSize(conn.RcloneRemote, p.Kind, remotePath, p.Files)
 	if err != nil {
-		return res, api.Errorf("connection.testFailed", "%v", err)
+		return res, api.Wrap("connection.testFailed", err)
 	}
 	res.FreeBytes = freeBytesNear(sp)
 	res.StorageNonEmpty = storageNonEmpty(sp, p.Kind, p.Files)
@@ -192,7 +193,7 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 		return DTO{}, err
 	}
 	if e.Vaults != nil && e.Vaults.IsLocked(conn.ID) {
-		return DTO{}, api.Errorf("offline.vaultLocked", "Unlock the Vault first")
+		return DTO{}, api.Fail("offline.vaultLocked", msg.New("vault.unlockFirst"))
 	}
 	it := store.OfflineItem{ID: store.NewID(), ConnectionID: conn.ID, Kind: p.Kind, RemotePath: strings.Trim(p.RemotePath, "/"),
 		NeedsResync: true, State: StatePending, CreatedAt: store.Now(), Advanced: map[string]any{}}
@@ -232,12 +233,12 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 		return DTO{}, err
 	}
 	if float64(pre.FreeBytes) < 1.1*float64(pre.RemoteBytes) {
-		return DTO{}, api.Errorf("offline.insufficientSpace", "Not enough free space: %s needed, %s available",
-			humanBytes(uint64(float64(pre.RemoteBytes)*1.1)), humanBytes(pre.FreeBytes)).
+		return DTO{}, api.Fail("offline.insufficientSpace", msg.New("offline.insufficientSpace",
+			"neededBytes", uint64(float64(pre.RemoteBytes)*1.1), "freeBytes", pre.FreeBytes)).
 			WithData("remoteBytes", pre.RemoteBytes).WithData("freeBytes", pre.FreeBytes)
 	}
 	if pre.StorageNonEmpty && !p.MergeExisting {
-		return DTO{}, api.Errorf("offline.storageNotEmpty", "The folder %s is not empty", it.StoragePath)
+		return DTO{}, api.Fail("offline.storageNotEmpty", msg.New("folder.notEmpty", "path", it.StoragePath))
 	}
 	if p.Excludes != nil {
 		it.Excludes = *p.Excludes
@@ -245,7 +246,7 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 		it.Excludes = e.settings().DefaultExcludes
 	}
 	if err := os.MkdirAll(it.StoragePath, 0o755); err != nil {
-		return DTO{}, api.Errorf("offline.locationMissing", "Cannot create %s: %v", it.StoragePath, err)
+		return DTO{}, api.Fail("offline.locationMissing", msg.New("path.createFailed", "path", it.StoragePath, "detail", err))
 	}
 	if err := e.st.InsertOfflineItem(it); err != nil {
 		return DTO{}, err
@@ -253,7 +254,7 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 	if err := WriteFilters(e.paths, it); err != nil {
 		return DTO{}, err
 	}
-	e.log.Info("offline", it.ID, fmt.Sprintf("Offline Item %q added at %s", itemName(it), it.StoragePath), nil)
+	e.log.Info("offline", it.ID, msg.New("offline.added", "name", ItemName(it), "path", it.StoragePath), nil)
 	now := e.Now()
 	e.mu.Lock()
 	rt := e.itemRT(it.ID)
@@ -289,24 +290,11 @@ func (e *Engine) mergeFiles(snapshot store.OfflineItem, files []string) (DTO, er
 		return DTO{}, err
 	}
 	e.itemRT(ex.ID).due = e.Now()
-	e.log.Info("offline", ex.ID, fmt.Sprintf("Added %d file(s) to Offline Item %q", len(files), itemName(ex)), files)
+	e.log.Info("offline", ex.ID, msg.New("offline.filesAdded", "count", len(files), "name", ItemName(ex)), files)
 	d := e.dtoLocked(ex)
 	e.pub.Publish("offline.status", d)
 	e.poke()
 	return d, nil
-}
-
-func humanBytes(n uint64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := uint64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // UpdateParams are offline.update params.
@@ -340,7 +328,7 @@ func (e *Engine) Update(ctx context.Context, p UpdateParams) (DTO, error) {
 			return DTO{}, err
 		}
 		e.itemRT(it.ID).due = e.Now()
-		e.log.Info("offline", it.ID, fmt.Sprintf("Settings of %q changed", itemName(it)), nil)
+		e.log.Info("offline", it.ID, msg.New("offline.settingsChanged", "name", ItemName(it)), nil)
 		e.poke()
 	}
 	d := e.dtoLocked(it)
@@ -393,18 +381,18 @@ func (e *Engine) Relocate(ctx context.Context, id, newPath string) (DTO, error) 
 		return DTO{}, err
 	}
 	if storageNonEmpty(dst, it.Kind, it.Files) {
-		return DTO{}, api.Errorf("offline.storageNotEmpty", "The folder %s is not empty", dst)
+		return DTO{}, api.Fail("offline.storageNotEmpty", msg.New("folder.notEmpty", "path", dst))
 	}
 	e.stopItem(id)
 	leftovers, err := moveItem(it, dst)
 	if err != nil {
 		e.restartItem(it)
-		return DTO{}, api.Errorf("offline.locationMissing", "Moving the files failed: %v", err)
+		return DTO{}, api.Fail("offline.locationMissing", msg.New("offline.moveFailed", "detail", err))
 	}
 	if len(leftovers) > 0 {
 		// The data is complete at dst; the item must point there even if
 		// cleaning up the old location failed.
-		e.log.Warn("offline", it.ID, fmt.Sprintf("Moved %q, but some files could not be removed from %s", itemName(it), it.StoragePath),
+		e.log.Warn("offline", it.ID, msg.New("offline.movedWithLeftovers", "name", ItemName(it), "path", it.StoragePath),
 			errorStrings(leftovers))
 	}
 	e.mu.Lock()
@@ -424,7 +412,7 @@ func (e *Engine) Relocate(ctx context.Context, id, newPath string) (DTO, error) 
 		return DTO{}, err
 	}
 	it = fresh
-	e.log.Info("offline", it.ID, fmt.Sprintf("Moved %q to %s", itemName(it), dst), nil)
+	e.log.Info("offline", it.ID, msg.New("offline.moved", "name", ItemName(it), "path", dst), nil)
 	return e.restartItem(it), nil
 }
 
@@ -597,7 +585,7 @@ func (e *Engine) Remove(ctx context.Context, id, localCopy string) error {
 			}
 			if err := platform.MoveToTrash(t); err != nil {
 				e.restartItem(it)
-				return api.Errorf("offline.locationMissing", "%v", err)
+				return api.Fail("offline.locationMissing", msg.New("offline.trashFailed", "detail", err))
 			}
 		}
 	}
@@ -609,11 +597,11 @@ func (e *Engine) Remove(ctx context.Context, id, localCopy string) error {
 	e.mu.Lock()
 	delete(e.rt, id)
 	e.mu.Unlock()
-	how := "kept"
+	code := "offline.removedKept"
 	if localCopy == "trash" {
-		how = "moved to the Trash"
+		code = "offline.removedTrash"
 	}
-	e.log.Info("offline", id, fmt.Sprintf("Offline Item %q removed; local copy %s", itemName(it), how), nil)
+	e.log.Info("offline", id, msg.New(code, "name", ItemName(it)), nil)
 	it.State = "removed"
 	e.pub.Publish("offline.status", DTO{OfflineItem: it})
 	return nil
@@ -637,7 +625,7 @@ func (e *Engine) SyncNow(id string) error {
 	}
 	e.mu.Unlock()
 	if id != "" && !found {
-		return api.Errorf("offline.notFound", "Offline Item %s not found", id)
+		return api.Fail("offline.notFound", msg.New("offline.notFound", "id", id))
 	}
 	e.poke()
 	return nil
@@ -678,7 +666,7 @@ func (e *Engine) ConfirmMassDelete(ctx context.Context, id, action string) (DTO,
 			return DTO{}, err
 		}
 		e.enqueueLocked(queued{itemID: id, ignorePause: true, force: true})
-		e.log.Info("offline", id, fmt.Sprintf("Deletions in %q confirmed", itemName(it)), nil)
+		e.log.Info("offline", id, msg.New("offline.deletionsConfirmed", "name", ItemName(it)), nil)
 	case "restore":
 		it.State, it.LastError = StatePending, ""
 		e.requestResyncLocked(&it)
@@ -686,7 +674,7 @@ func (e *Engine) ConfirmMassDelete(ctx context.Context, id, action string) (DTO,
 			return DTO{}, err
 		}
 		e.enqueueLocked(queued{itemID: id, ignorePause: true})
-		e.log.Info("offline", id, fmt.Sprintf("Deleted files of %q will be restored", itemName(it)), nil)
+		e.log.Info("offline", id, msg.New("offline.deletionsRestored", "name", ItemName(it)), nil)
 	default:
 		return DTO{}, api.Invalid("action must be delete or restore")
 	}
@@ -777,14 +765,14 @@ func (e *Engine) SetPause(until *int64, indefinite bool) PauseStatus {
 	case indefinite:
 		t := time.Time{}
 		e.manualUntil = &t
-		e.log.Info("offline", "", "Syncing paused until resumed", nil)
+		e.log.Info("offline", "", msg.New("offline.pausedManually"), nil)
 	case until != nil && *until > e.Now().UnixMilli():
 		t := time.UnixMilli(*until)
 		e.manualUntil = &t
-		e.log.Info("offline", "", "Syncing paused until "+t.Format("2006-01-02 15:04"), nil)
+		e.log.Info("offline", "", msg.New("offline.pausedUntil", "untilMs", *until), nil)
 	default:
 		e.manualUntil = nil
-		e.log.Info("offline", "", "Syncing resumed", nil)
+		e.log.Info("offline", "", msg.New("offline.resumed"), nil)
 	}
 	if e.manualUntil != nil && e.cur != nil && !e.cur.q.ignorePause {
 		e.stopCurrentLocked(pauserules.RuleManual)
@@ -802,6 +790,31 @@ func (e *Engine) EnqueueMigration(req *MigrationRequest) {
 	e.queue = append(e.queue, queued{migration: req, ignorePause: req.IgnorePause})
 	e.mu.Unlock()
 	e.poke()
+}
+
+// CancelMigration drops a queued migration or stops the running one without
+// re-queuing it; its OnResult is not called. It reports whether the job was
+// queued or running.
+func (e *Engine) CancelMigration(jobID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	key := "m:" + jobID
+	found := false
+	e.queue = slices.DeleteFunc(e.queue, func(q queued) bool {
+		if q.key() == key {
+			found = true
+			return true
+		}
+		return false
+	})
+	if r := e.cur; r != nil && r.q.key() == key && !r.canceled {
+		r.canceled, found = true, true
+		if !r.stopping { // a Pause Rule stop is already underway otherwise
+			r.stopping = true
+			go r.job.Stop(30 * time.Second)
+		}
+	}
+	return found
 }
 
 // PauseForConnection pauses the items of a (locked) Vault connection.

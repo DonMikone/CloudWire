@@ -88,7 +88,7 @@ func DefaultSettings() Settings {
 		Autostart:             true,
 		MenuBarIcon:           true,
 		BaseFolder:            "~/CloudWire",
-		MountFolder:           "~/CloudWire/Laufwerke",
+		MountFolder:           "~/CloudWire/Mounts",
 		QuietPeriodSeconds:    60,
 		PollIntervalSeconds:   60,
 		NextcloudEtagSeconds:  60,

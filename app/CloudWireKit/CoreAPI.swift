@@ -84,6 +84,11 @@ extension CoreClient {
                        params: JSONValue.params(["serverURL": serverURL, "name": name]))
     }
 
+    /// Signs an existing Nextcloud Connection in again; the result arrives as a login event.
+    public func nextcloudLoginRenew(connectionId: String) async throws -> NextcloudLoginStart {
+        try await call("connections.nextcloudLoginStart", params: JSONValue.params(["connectionId": connectionId]))
+    }
+
     public func nextcloudLoginCancel(flowId: String) async throws {
         _ = try await call("connections.nextcloudLoginCancel", params: JSONValue.params(["flowId": flowId]),
                            as: EmptyResult.self)
@@ -299,9 +304,9 @@ extension CoreClient {
                        ]))
     }
 
-    public func deleteShare(connectionId: String, id: String) async throws {
-        _ = try await call("shares.delete", params: JSONValue.params(["connectionId": connectionId, "id": id]),
-                           as: EmptyResult.self)
+    @discardableResult
+    public func deleteShare(connectionId: String, id: String) async throws -> ShareDeleteResult {
+        try await call("shares.delete", params: JSONValue.params(["connectionId": connectionId, "id": id]))
     }
 
     public func searchSharees(connectionId: String, search: String, itemType: String) async throws -> [Sharee] {
@@ -418,6 +423,16 @@ extension CoreClient {
     public func migrationConfirmDelete(jobId: String) async throws {
         _ = try await call("vaults.migrationConfirmDelete", params: JSONValue.params(["jobId": jobId]),
                            as: EmptyResult.self)
+    }
+
+    /// All encryption jobs the Core knows, newest first.
+    public func vaultMigrations() async throws -> [VaultMigrationEvent] {
+        try await call("vaults.migrations")
+    }
+
+    /// Cancels a queued or running encryption job.
+    public func cancelMigration(jobId: String) async throws {
+        _ = try await call("vaults.migrationCancel", params: JSONValue.params(["jobId": jobId]), as: EmptyResult.self)
     }
 
     // MARK: paths, Finder, activity, notifications, updates

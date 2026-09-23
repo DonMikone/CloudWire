@@ -14,6 +14,8 @@ import (
 	"net"
 	"os"
 	"sync"
+
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 )
 
 // JSON-RPC error codes.
@@ -31,18 +33,39 @@ const maxLine = 16 << 20
 // Handler serves one method.
 type Handler func(ctx context.Context, params json.RawMessage) (any, error)
 
-// Error is an application error with a stable code (plan Appendix A).
+// Error is an application error. Code is its category (plan Appendix A), the
+// App's key for headlines and logic; Text is the detail sentence (package msg),
+// sent as data.key and data.params beside the English data.message.
 type Error struct {
-	Code    string
-	Message string
-	Data    map[string]any
+	Code string
+	Text msg.Text
+	Data map[string]any
 }
 
-func (e *Error) Error() string { return e.Code + ": " + e.Message }
+func (e *Error) Error() string { return e.Code + ": " + e.Text.Message }
 
-// Errorf builds an application error.
-func Errorf(code, format string, args ...any) *Error {
-	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+// Fail builds an application error of category code whose detail is t.
+func Fail(code string, t msg.Text) *Error {
+	return &Error{Code: code, Text: t}
+}
+
+// Wrap builds an application error of category code from err: the Text of an
+// application or parameter error, otherwise err's raw text as detail.
+func Wrap(code string, err error) *Error {
+	return Fail(code, TextOf(err))
+}
+
+// TextOf returns the user-facing text of err (see Wrap).
+func TextOf(err error) msg.Text {
+	var ae *Error
+	if errors.As(err, &ae) {
+		return ae.Text
+	}
+	var ip InvalidParams
+	if errors.As(err, &ip) && ip.Text.Code != "" {
+		return ip.Text
+	}
+	return msg.Detail(err.Error())
 }
 
 // WithData attaches extra fields to the error's data object.
@@ -54,14 +77,23 @@ func (e *Error) WithData(k string, v any) *Error {
 	return e
 }
 
-// InvalidParams is returned for malformed parameters.
-type InvalidParams struct{ Err error }
+// InvalidParams is returned for malformed parameters. Text is set for the
+// ones a user can cause; the others are programming errors of the client.
+type InvalidParams struct {
+	Err  error
+	Text msg.Text
+}
 
 func (e InvalidParams) Error() string { return "invalid params: " + e.Err.Error() }
 
 // Invalid returns an InvalidParams error with a message.
 func Invalid(format string, args ...any) error {
-	return InvalidParams{fmt.Errorf(format, args...)}
+	return InvalidParams{Err: fmt.Errorf(format, args...)}
+}
+
+// InvalidText returns an InvalidParams error the App can translate.
+func InvalidText(t msg.Text) error {
+	return InvalidParams{Err: errors.New(t.Message), Text: t}
 }
 
 // Bind adapts a typed handler: params are decoded into T. Unknown fields are
@@ -72,7 +104,7 @@ func Bind[T any](fn func(ctx context.Context, p T) (any, error)) Handler {
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
 			if err := json.Unmarshal(trimmed, &p); err != nil {
-				return nil, InvalidParams{err}
+				return nil, InvalidParams{Err: err}
 			}
 		}
 		return fn(ctx, p)
@@ -350,7 +382,11 @@ func (s *Server) dispatch(ctx context.Context, req request) (resp response) {
 func toRPCError(err error) *rpcError {
 	var ip InvalidParams
 	if errors.As(err, &ip) {
-		return &rpcError{Code: CodeInvalidParams, Message: ip.Error()}
+		e := &rpcError{Code: CodeInvalidParams, Message: ip.Error()}
+		if ip.Text.Code != "" {
+			e.Data = textData(map[string]any{}, ip.Text)
+		}
+		return e
 	}
 	var ae *Error
 	if errors.As(err, &ae) {
@@ -359,11 +395,22 @@ func toRPCError(err error) *rpcError {
 			data[k] = v
 		}
 		data["code"] = ae.Code
-		data["message"] = ae.Message
-		return &rpcError{Code: CodeApplication, Message: ae.Message, Data: data}
+		return &rpcError{Code: CodeApplication, Message: ae.Text.Message, Data: textData(data, ae.Text)}
 	}
 	return &rpcError{Code: CodeApplication, Message: err.Error(),
-		Data: map[string]any{"code": "core.internal", "message": err.Error()}}
+		Data: textData(map[string]any{"code": "core.internal"}, msg.Detail(err.Error()))}
+}
+
+// textData adds t to an error's data object: message, key and params.
+func textData(data map[string]any, t msg.Text) map[string]any {
+	data["message"] = t.Message
+	if t.Code != "" {
+		data["key"] = t.Code
+	}
+	if len(t.Params) > 0 {
+		data["params"] = t.Params
+	}
+	return data
 }
 
 func (c *conn) writeJSON(v any) error {

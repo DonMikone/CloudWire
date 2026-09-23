@@ -2,7 +2,6 @@ package offline
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/notify"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
@@ -82,10 +82,13 @@ type MigrationRequest struct {
 	VaultID     string
 	Job         sv.MigrateJob
 	IgnorePause bool
-	// OnResult receives the final worker result.
+	// OnResult receives the final worker result; never called for a job
+	// ended by CancelMigration.
 	OnResult func(sv.Msg)
 	// OnStart is called when the job starts running.
 	OnStart func()
+	// OnProgress receives the worker's progress messages while it runs.
+	OnProgress func(sv.Msg)
 }
 
 type queued struct {
@@ -108,8 +111,10 @@ type running struct {
 	runID     int64
 	started   time.Time
 	stopping  bool
+	canceled  bool              // migration stopped by CancelMigration: no re-queue, no result
 	files     map[string]string // path -> action
 	resyncGen int               // item resync generation when the run started
+	abort     string            // bisync safety abort log line (Mass-Delete Guard)
 }
 
 type itemRT struct {
@@ -490,9 +495,9 @@ func (e *Engine) pausedLocked(now time.Time) (string, bool) {
 	e.lastRules = rules
 	if changed {
 		if len(rules) > 0 {
-			e.log.Info("offline", "", fmt.Sprintf("Syncing paused: %s (%s)", rules[0].ID, rules[0].Detail), rules)
+			e.log.Info("offline", "", msg.New("offline.pausedByRule").Because(rules[0].Text), rules)
 		} else {
-			e.log.Info("offline", "", "Pause Rules no longer active; syncing resumes", nil)
+			e.log.Info("offline", "", msg.New("offline.rulesInactive"), nil)
 		}
 		e.publishPauseLocked()
 	}
@@ -544,19 +549,41 @@ func (e *Engine) setStateLocked(it store.OfflineItem, state, reason string) {
 // DTO is the contract's OfflineItem object.
 type DTO struct {
 	store.OfflineItem
-	Progress *Progress `json:"progress"`
-	IsVault  bool      `json:"isVault"`
+	// ReasonCode and ReasonParams translate the reason of an item in
+	// StateError (package msg); pause reasons stay ids.
+	ReasonCode   string          `json:"reasonCode,omitempty"`
+	ReasonParams msg.Params      `json:"reasonParams,omitempty"`
+	Progress     *Progress       `json:"progress"`
+	IsVault      bool            `json:"isVault"`
+	MassDelete   *MassDeleteInfo `json:"massDelete,omitempty"`
 }
 
 func (e *Engine) dtoLocked(it store.OfflineItem) DTO {
 	d := DTO{OfflineItem: it}
+	t := errorReason(it)
+	d.ReasonCode, d.ReasonParams = t.Code, t.Params
 	if rt := e.rt[it.ID]; rt != nil && it.State == StateSyncing {
 		d.Progress = rt.progress
 	}
 	if c, err := e.st.Connection(it.ConnectionID); err == nil {
 		d.IsVault = c.Kind == "vault"
 	}
+	if it.State == StateNeedsConfirmation {
+		d.MassDelete = ParseMassDelete(it.LastError)
+	}
 	return d
+}
+
+// errorReason is the translatable text of a failed item's raw reason; zero
+// for items in any other state.
+func errorReason(it store.OfflineItem) msg.Text {
+	if it.State != StateError || it.LastError == "" {
+		return msg.Text{}
+	}
+	if strings.Contains(strings.ToLower(it.LastError), "directory not found") {
+		return msg.New("offline.cloudFolderMissing", "detail", it.LastError)
+	}
+	return msg.New("offline.syncFailed", "detail", it.LastError)
 }
 
 func (e *Engine) publishItemLocked(it store.OfflineItem) {
@@ -669,7 +696,13 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 }
 
 func (e *Engine) onMsg(r *running, m sv.Msg) {
-	if m.Type != "progress" || r.q.migration != nil {
+	if m.Type != "progress" {
+		return
+	}
+	if mr := r.q.migration; mr != nil {
+		if mr.OnProgress != nil {
+			mr.OnProgress(m)
+		}
 		return
 	}
 	p := &Progress{ID: r.q.itemID, Bytes: m.Bytes, TotalBytes: m.TotalBytes, Transfers: m.Transfers, ETA: m.ETA}
@@ -710,12 +743,34 @@ func (e *Engine) onLog(r *running, l sv.LogLine, label string) {
 	}
 	switch l.Level {
 	case "error", "critical":
-		e.log.Error("sync", subject, l.Msg, map[string]string{"object": l.Object})
+		if r.q.migration == nil {
+			if text := safetyAbort(l); text != "" {
+				e.mu.Lock()
+				if r.abort == "" {
+					r.abort = text
+				}
+				e.mu.Unlock()
+			}
+		}
+		e.log.Error("sync", subject, msg.New("rclone.error", "detail", l.Msg), map[string]string{"object": l.Object})
 	default:
 		if e.log.Enabled("debug") {
-			e.log.Debug("sync", subject, l.Msg, map[string]string{"object": l.Object, "level": l.Level})
+			e.log.Debug("sync", subject, msg.Detail(l.Msg), map[string]string{"object": l.Object, "level": l.Level})
 		}
 	}
+}
+
+// safetyAbort returns the text of a bisync safety abort log line ("" for any
+// other line). rclone logs "too many deletes" with the object "Safety abort".
+func safetyAbort(l sv.LogLine) string {
+	text := l.Msg
+	if l.Object != "" {
+		text = l.Object + ": " + text
+	}
+	if ParseMassDelete(text) == nil {
+		return ""
+	}
+	return text
 }
 
 // stopCurrentLocked stops the running job gracefully (30 s, then SIGKILL)
@@ -757,6 +812,9 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		}
 	}
 	if r.q.migration != nil {
+		if r.canceled {
+			return // CancelMigration already settled the job
+		}
 		if r.stopping && status == sv.StatusStopped {
 			return // re-queued
 		}
@@ -771,7 +829,7 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 	}
 	rt := e.itemRT(it.ID)
 	rt.progress = nil
-	name := itemName(it)
+	name := ItemName(it)
 	now := e.Now()
 	switch status {
 	case sv.StatusOK:
@@ -801,10 +859,10 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 			go e.startFSEvents(it)
 		}
 		if counts["transferred"]+counts["deleted"]+counts["conflict"] > 0 {
-			e.log.Info("sync", it.ID, fmt.Sprintf("Synced %q: %d transferred, %d deleted, %d conflicts", name,
-				counts["transferred"], counts["deleted"], counts["conflict"]), map[string]any{"runId": r.runID})
+			e.log.Info("sync", it.ID, msg.New("sync.done", "name", name, "transferred", counts["transferred"],
+				"deleted", counts["deleted"], "conflicts", counts["conflict"]), map[string]any{"runId": r.runID})
 		} else {
-			e.log.Debug("sync", it.ID, fmt.Sprintf("Synced %q: no changes", name), map[string]any{"runId": r.runID})
+			e.log.Debug("sync", it.ID, msg.New("sync.noChanges", "name", name), map[string]any{"runId": r.runID})
 		}
 		if counts["conflict"] > 0 {
 			var cf []string
@@ -813,7 +871,7 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 					cf = append(cf, p)
 				}
 			}
-			e.log.Warn("sync", it.ID, fmt.Sprintf("%d conflict copies created in %q", len(cf), name), cf)
+			e.log.Warn("sync", it.ID, msg.New("sync.conflicts", "count", len(cf), "name", name), cf)
 			e.notify.Notify(notify.KindConflict, map[string]any{"itemId": it.ID, "itemName": name, "files": cf})
 		}
 		if e.Mounts != nil {
@@ -826,10 +884,20 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		}
 		e.publishItemLocked(it)
 	case sv.StatusMassDelete:
-		it.State, it.LastError = StateNeedsConfirmation, out.Error
+		// The logged abort names the side and counts; it is kept as the reason
+		// so the banner survives a Core restart.
+		reason := r.abort
+		if reason == "" {
+			reason = out.Error
+		}
+		it.State, it.LastError = StateNeedsConfirmation, reason
 		_ = e.st.UpdateOfflineItem(it)
-		e.log.Warn("sync", it.ID, fmt.Sprintf("Mass-Delete Guard stopped %q: %s", name, out.Error), map[string]any{"runId": r.runID})
-		e.notify.Notify(notify.KindMassDelete, map[string]any{"itemId": it.ID, "itemName": name, "message": out.Error})
+		e.log.Warn("sync", it.ID, msg.New("sync.massDelete", "name", name, "detail", reason), map[string]any{"runId": r.runID})
+		params := map[string]any{"itemId": it.ID, "itemName": name, "message": reason}
+		if md := ParseMassDelete(reason); md != nil {
+			params["reason"], params["side"], params["deletes"], params["total"] = md.Reason, md.Side, md.Deletes, md.Total
+		}
+		e.notify.Notify(notify.KindMassDelete, params)
 		e.publishItemLocked(it)
 	case sv.StatusStopped:
 		if !r.stopping {
@@ -845,10 +913,11 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		it.State, it.LastError = StateError, out.Error
 		_ = e.st.UpdateOfflineItem(it)
 		rt.retryAt = now.Add(5 * time.Minute)
-		e.log.Error("sync", it.ID, fmt.Sprintf("Sync of %q failed: %s", name, out.Error), map[string]any{"runId": r.runID})
+		t := msg.New("sync.failed", "name", name, "detail", out.Error)
+		e.log.Error("sync", it.ID, t, map[string]any{"runId": r.runID})
 		if !rt.lastNotifiedEr {
 			rt.lastNotifiedEr = true
-			e.notify.Notify(notify.KindError, map[string]any{"title": name, "message": out.Error, "subjectId": it.ID})
+			e.notify.Notify(notify.KindError, notify.ErrorParams(name, it.ID, t))
 		}
 		e.publishItemLocked(it)
 	}

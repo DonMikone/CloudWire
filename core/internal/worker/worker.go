@@ -158,12 +158,25 @@ func runNFSMount(m *sv.MountJob, cmds <-chan sv.Command, out *emitter) int {
 		return 1
 	}
 	stopServer := func() { _, _ = rcl.Call("serve/stop", map[string]any{"id": started.ID}) }
+	// Finder names the volume's server after the host (ADR 0009). The record
+	// lives as long as this worker, also when it only takes over an existing
+	// kernel mount, in case the NFS client resolves the host again.
+	host := mounts.NFSHost(m.MountPoint)
+	release, regErr := platform.RegisterLoopbackHost(host)
+	if regErr == nil {
+		defer release()
+	}
+	var warning string
 	if !mounts.IsMounted(m.MountPoint) {
+		if regErr != nil {
+			warning = regErr.Error()
+			host = "localhost"
+		}
 		args := []string{"-t", "nfs", "-o", fmt.Sprintf("port=%d", m.Port), "-o", fmt.Sprintf("mountport=%d", m.Port), "-o", "tcp"}
 		for _, o := range m.MountOptions {
 			args = append(args, "-o", o)
 		}
-		args = append(args, "localhost:/", m.MountPoint)
+		args = append(args, host+":/", m.MountPoint)
 		// Disclaimed: mount must not inherit our (missing) Network Volumes consent.
 		if b, err := platform.RunDisclaimed(60*time.Second, "/sbin/mount", args...); err != nil {
 			stopServer()
@@ -172,7 +185,7 @@ func runNFSMount(m *sv.MountJob, cmds <-chan sv.Command, out *emitter) int {
 			return 1
 		}
 	}
-	out.emit(sv.Msg{Type: "mounted", MountPoint: m.MountPoint})
+	out.emit(sv.Msg{Type: "mounted", MountPoint: m.MountPoint, Error: warning})
 	return serveMount(m.MountPoint, cmds, out, func() error {
 		// The server is still running, so the system NFS client detaches quickly.
 		err := forceUnmount(m.MountPoint)

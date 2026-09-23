@@ -2,9 +2,12 @@ package store
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 )
 
 func openTest(t *testing.T) *Store {
@@ -49,6 +52,73 @@ func TestMigrationsAndReopen(t *testing.T) {
 	}
 }
 
+func TestMountFolderMigrationKeepsOldDefaultForExistingMounts(t *testing.T) {
+	fresh := openTest(t)
+	if st, _ := fresh.Settings(); st.MountFolder != "~/CloudWire/Mounts" {
+		t.Fatalf("fresh install mount folder %q", st.MountFolder)
+	}
+
+	path := filepath.Join(t.TempDir(), "cloudwire.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertConnection(Connection{ID: "a", Name: "Cloud", Kind: "remote", RcloneRemote: "cw-a", Provider: "webdav", CreatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertMount(Mount{ID: "m", ConnectionID: "a", MountPoint: "/x", VolumeName: "x", MountType: "nfsmount", CacheMaxGB: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// Pretend the database predates migration 3 (and so migration 4).
+	if _, err := s.DB().Exec(`UPDATE schema_version SET version = 2;
+ALTER TABLE activity DROP COLUMN code; ALTER TABLE activity DROP COLUMN params`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if st, _ := s.Settings(); st.MountFolder != "~/CloudWire/Laufwerke" {
+		t.Fatalf("existing install mount folder %q, want the previous default", st.MountFolder)
+	}
+}
+
+func TestActivityCodesMigrationKeepsOldEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cloudwire.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pretend the database predates migration 4 and holds an entry of that time.
+	if _, err := s.DB().Exec(`ALTER TABLE activity DROP COLUMN code; ALTER TABLE activity DROP COLUMN params;
+UPDATE schema_version SET version = 3;
+INSERT INTO activity(ts,level,category,message) VALUES (1,'info','mount','Mount "NC" removed')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer s.Close()
+	failed := msg.New("sync.failed", "name", "Album", "detail", "directory not found")
+	if _, err := s.AppendActivity("error", "sync", "of1", failed, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.QueryActivity(ActivityFilter{})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("entries after upgrade: %+v %v", got, err)
+	}
+	if !reflect.DeepEqual(got[0].Text, failed) {
+		t.Fatalf("new entry text %+v, want %+v", got[0].Text, failed)
+	}
+	if old := got[1].Text; !reflect.DeepEqual(old, msg.Text{Message: `Mount "NC" removed`}) {
+		t.Fatalf("old entry must keep its message without a code: %+v", old)
+	}
+}
+
 func TestForeignKeysEnforced(t *testing.T) {
 	s := openTest(t)
 	err := s.InsertMount(Mount{ID: "m", ConnectionID: "missing", MountPoint: "/x", VolumeName: "x", MountType: "nfsmount", CacheMaxGB: 1})
@@ -88,8 +158,8 @@ func TestSettingsDefaultsAndMergePatch(t *testing.T) {
 
 func TestActivityFilters(t *testing.T) {
 	s := openTest(t)
-	mustAppend := func(level, cat, msg string) {
-		if _, err := s.AppendActivity(level, cat, "", msg, map[string]any{"k": msg}); err != nil {
+	mustAppend := func(level, cat, text string) {
+		if _, err := s.AppendActivity(level, cat, "", msg.Text{Message: text}, map[string]any{"k": text}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,7 +197,7 @@ func TestPruneByAge(t *testing.T) {
 	runID, _ := s.StartRun("item", "bisync")
 	_ = s.FinishRun(SyncRun{ID: runID, Status: "ok"}, []SyncRunFile{{Action: "transferred", Path: "a"}})
 	_, _ = s.DB().Exec(`UPDATE sync_runs SET started_at=? WHERE id=?`, old, runID)
-	_, _ = s.AppendActivity("info", "core", "", "new", nil)
+	_, _ = s.AppendActivity("info", "core", "", msg.Text{Message: "new"}, nil)
 	if err := s.Prune(30, 50); err != nil {
 		t.Fatal(err)
 	}

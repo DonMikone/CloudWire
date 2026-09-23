@@ -7,14 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
 	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/keychain"
+	"github.com/DonMikone/CloudWire/core/internal/notify"
+	"github.com/DonMikone/CloudWire/core/internal/offline"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/rcl"
 	"github.com/DonMikone/CloudWire/core/internal/store"
+	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
 
 var cloudDir string
@@ -56,6 +60,10 @@ type nopPub struct{}
 
 func (nopPub) Publish(string, any) {}
 
+type nopNotify struct{}
+
+func (nopNotify) Notify(string, any) {}
+
 // newMac simulates a Mac with its own database and the parent Connection.
 func newMac(t *testing.T) *Service {
 	t.Helper()
@@ -68,7 +76,7 @@ func newMac(t *testing.T) *Service {
 	if err := st.InsertConnection(store.Connection{ID: "p", Name: "Cloud", Kind: "remote", RcloneRemote: "cw-p", Provider: "alias", CreatedAt: 1}); err != nil {
 		t.Fatal(err)
 	}
-	s := NewService(st, activity.New(st, nopPub{}), nopPub{}, paths.ForHome(home))
+	s := NewService(st, activity.New(st, nopPub{}), nopNotify{}, nopPub{}, paths.ForHome(home))
 	s.Keychain = memKeychain{}
 	return s
 }
@@ -194,5 +202,94 @@ func TestShortPasswordRejected(t *testing.T) {
 	s := newMac(t)
 	if _, err := s.Create(context.Background(), CreateParams{ConnectionID: "p", Name: "x", Password: "short"}); err == nil {
 		t.Fatal("short password accepted")
+	}
+}
+
+type fakeOffline struct{ reqs []*offline.MigrationRequest }
+
+func (*fakeOffline) PauseForConnection(string, string)              {}
+func (*fakeOffline) ResumeForConnection(string)                     {}
+func (f *fakeOffline) EnqueueMigration(r *offline.MigrationRequest) { f.reqs = append(f.reqs, r) }
+func (*fakeOffline) CancelMigration(string) bool                    { return true }
+
+type recNotify struct {
+	mu     sync.Mutex
+	params []map[string]any
+}
+
+func (r *recNotify) Notify(kind string, p any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if kind == notify.KindVaultMigration {
+		r.params = append(r.params, p.(map[string]any))
+	}
+}
+
+func migrationOf(t *testing.T, s *Service, jobID string) Migration {
+	t.Helper()
+	for _, m := range s.Migrations() {
+		if m.JobID == jobID {
+			return m
+		}
+	}
+	t.Fatalf("migration %s not listed", jobID)
+	return Migration{}
+}
+
+func TestMigrationCancelAndResult(t *testing.T) {
+	ctx := context.Background()
+	s := newMac(t)
+	off, notes := &fakeOffline{}, &recNotify{}
+	s.Offline, s.notify = off, notes
+	res, err := s.Create(ctx, CreateParams{ConnectionID: "p", Name: "Jobs", Password: "correct horse", UnlockMode: "keychain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypt := func(src string) string {
+		p := EncryptParams{ConnectionID: "p", Path: src, IsDir: true}
+		p.Target.VaultID = res.Vault.ID
+		r, err := s.EncryptExisting(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.JobID
+	}
+	isInvalid := func(err error) bool { return errors.As(err, new(api.InvalidParams)) }
+
+	// A canceled job ignores the engine's late callbacks.
+	canceled := encrypt("Docs")
+	req := off.reqs[0]
+	if err := s.MigrationCancel(ctx, canceled); err != nil {
+		t.Fatal(err)
+	}
+	req.OnStart()
+	req.OnProgress(sv.Msg{Type: "progress", Bytes: 5, TotalBytes: 10})
+	req.OnResult(sv.Msg{Type: "result", Status: sv.StatusError, Error: "context canceled"})
+	if m := migrationOf(t, s, canceled); m.Status != "canceled" || m.Bytes != 0 || m.Error != "" ||
+		m.ConnectionID != "p" || m.Path != "Docs" || !m.IsDir || m.CreatedAt == 0 {
+		t.Fatalf("canceled job %+v", m)
+	}
+	if err := s.MigrationCancel(ctx, canceled); !isInvalid(err) {
+		t.Fatalf("second cancel: %v", err)
+	}
+
+	// A finished job reports progress, its result and a notification.
+	done := encrypt("Photos")
+	req = off.reqs[1]
+	req.OnStart()
+	req.OnProgress(sv.Msg{Type: "progress", Bytes: 5, TotalBytes: 10, Transfers: 1})
+	if m := migrationOf(t, s, done); m.Status != "running" || m.Bytes != 5 || m.TotalBytes != 10 || m.Transfers != 1 {
+		t.Fatalf("running job %+v", m)
+	}
+	req.OnResult(sv.Msg{Type: "result", Status: sv.StatusMismatch, Mismatches: []string{"a.jpg"}})
+	if m := migrationOf(t, s, done); m.Status != "mismatch" {
+		t.Fatalf("finished job %+v", m)
+	}
+	if err := s.MigrationCancel(ctx, done); !isInvalid(err) {
+		t.Fatalf("cancel after the end: %v", err)
+	}
+	if len(notes.params) != 1 || notes.params[0]["jobId"] != done || notes.params[0]["status"] != "mismatch" ||
+		notes.params[0]["count"] != 1 || notes.params[0]["path"] != "Photos" || notes.params[0]["vaultName"] != "Jobs" {
+		t.Fatalf("notifications %v", notes.params)
 	}
 }

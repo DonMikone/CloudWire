@@ -224,4 +224,25 @@ struct OptionFormModelTests {
         form.setText("s3cret", forName: "pass")
         #expect(try form.changedParameters(from: stored)["pass"] == "s3cret")
     }
+
+    @Test("field labels drop the help line's full stop but keep ellipses", arguments: [
+        ("User name.\nLeave blank to use the default.", "User name"),
+        ("OAuth Client Id", "OAuth Client Id"),
+        ("Wait for more...", "Wait for more..."),
+        ("", "user"),
+    ])
+    func optionTitle(help: String, expected: String) throws {
+        #expect(try option(["Name": "user", "Help": help]).title == expected)
+    }
+
+    @Test("provider short names drop remarks and fall back to the type name for long descriptions", arguments: [
+        ("drive", "Google Drive", "Google Drive"),
+        ("gcs", "Google Cloud Storage (this is not Google Drive)", "Google Cloud Storage"),
+        ("s3", "Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph", "S3"),
+        ("sftp", "", "Sftp"),
+    ])
+    func providerShortName(name: String, description: String, expected: String) throws {
+        let data = try JSONSerialization.data(withJSONObject: ["Name": name, "Description": description])
+        #expect(try JSONDecoder().decode(RcloneProvider.self, from: data).shortName == expected)
+    }
 }

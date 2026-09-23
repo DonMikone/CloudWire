@@ -97,6 +97,33 @@ func TestExcluded(t *testing.T) {
 	}
 }
 
+func TestParseMassDelete(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want *MassDeleteInfo
+	}{
+		{`Safety abort: too many deletes (>50%, 5 of 9) on Path1 "/Users/mike/CloudWire/NC/Music/". Run with --force if desired.`,
+			&MassDeleteInfo{Reason: "tooManyDeletes", Side: "local", Deletes: 5, Total: 9}},
+		{`Safety abort: too many deletes (>50%, 120 of 200) on Path2 "cw-x1:Music/". Run with --force if desired.`,
+			&MassDeleteInfo{Reason: "tooManyDeletes", Side: "cloud", Deletes: 120, Total: 200}},
+		{`Safety abort: all files were changed on Path1 "/Users/mike/CloudWire/NC/Music/". Run with --force if desired.`,
+			&MassDeleteInfo{Reason: "allChanged", Side: "local"}},
+		{`Safety abort: all files were changed on Path2 "cw-x1:Music/". Run with --force if desired.`,
+			&MassDeleteInfo{Reason: "allChanged", Side: "cloud"}},
+		// The worker's error without the logged line, and other failures.
+		{"too many deletes", nil},
+		{"all files were changed", nil},
+		{`too many deletes (>50%, 99999999999999999999 of 9) on Path1 "/x"`, nil},
+		{`too many deletes (>50%, 5 of 9) on Path3 "/x"`, nil},
+		{"bisync aborted", nil},
+		{"", nil},
+	} {
+		if got := ParseMassDelete(tc.text); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("ParseMassDelete(%q) = %+v, want %+v", tc.text, got, tc.want)
+		}
+	}
+}
+
 func TestDefaultStoragePath(t *testing.T) {
 	if got := DefaultStoragePath("/Users/mike/CloudWire", "My: Cloud/1", "Music/Live:Sets"); got != "/Users/mike/CloudWire/My- Cloud-1/Music/Live-Sets" {
 		t.Fatalf("got %q", got)
@@ -135,6 +162,8 @@ func TestValidateOverlapAndMerge(t *testing.T) {
 		{"inside mount", store.OfflineItem{ConnectionID: "c2", Kind: "folder", RemotePath: "A", StoragePath: "/Users/mike/CloudWire/Laufwerke/NC/A"}, "offline.overlap"},
 		{"home itself", store.OfflineItem{ConnectionID: "c2", Kind: "folder", RemotePath: "A", StoragePath: "/Users/mike"}, "offline.overlap"},
 		{"app support", store.OfflineItem{ConnectionID: "c2", Kind: "folder", RemotePath: "A", StoragePath: "/Users/mike/Library/Application Support/CloudWire/x"}, "offline.overlap"},
+		{"vault folder", store.OfflineItem{ConnectionID: "c2", Kind: "folder", RemotePath: "Docs/Privat.cwvault", StoragePath: "/Users/mike/U"}, "offline.vaultFolder"},
+		{"inside vault folder", store.OfflineItem{ConnectionID: "c2", Kind: "files", RemotePath: "Privat.cwvault/d", Files: []string{"x"}, StoragePath: "/Users/mike/T"}, "offline.vaultFolder"},
 	}
 	for _, c := range cases {
 		_, err := validateNew(c.it, existing, []string{"/Users/mike/CloudWire/Laufwerke/NC"}, p)

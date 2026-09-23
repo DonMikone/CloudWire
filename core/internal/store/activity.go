@@ -5,17 +5,20 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 )
 
-// Activity is one Activity Log entry.
+// Activity is one Activity Log entry. Its text is a msg.Text; entries from
+// before Migration 4 have no code.
 type Activity struct {
-	ID        int64           `json:"id"`
-	TS        int64           `json:"ts"`
-	Level     string          `json:"level"`
-	Category  string          `json:"category"`
-	SubjectID string          `json:"subjectId"`
-	Message   string          `json:"message"`
-	Details   json.RawMessage `json:"details"`
+	ID        int64  `json:"id"`
+	TS        int64  `json:"ts"`
+	Level     string `json:"level"`
+	Category  string `json:"category"`
+	SubjectID string `json:"subjectId"`
+	msg.Text
+	Details json.RawMessage `json:"details"`
 }
 
 // ActivityFilter selects Activity entries (newest first).
@@ -28,9 +31,9 @@ type ActivityFilter struct {
 }
 
 // AppendActivity writes an Activity entry. details may be nil.
-func (s *Store) AppendActivity(level, category, subjectID, message string, details any) (Activity, error) {
-	a := Activity{TS: Now(), Level: level, Category: category, SubjectID: subjectID, Message: message}
-	var det sql.NullString
+func (s *Store) AppendActivity(level, category, subjectID string, t msg.Text, details any) (Activity, error) {
+	a := Activity{TS: Now(), Level: level, Category: category, SubjectID: subjectID, Text: t}
+	var det, params sql.NullString
 	if details != nil {
 		b, err := json.Marshal(details)
 		if err != nil {
@@ -39,8 +42,15 @@ func (s *Store) AppendActivity(level, category, subjectID, message string, detai
 		a.Details = b
 		det = sql.NullString{String: string(b), Valid: true}
 	}
-	res, err := s.db.Exec(`INSERT INTO activity(ts,level,category,subject_id,message,details) VALUES (?,?,?,?,?,?)`,
-		a.TS, a.Level, a.Category, nullString(subjectID), a.Message, det)
+	if len(t.Params) > 0 {
+		b, err := json.Marshal(t.Params)
+		if err != nil {
+			return a, err
+		}
+		params = sql.NullString{String: string(b), Valid: true}
+	}
+	res, err := s.db.Exec(`INSERT INTO activity(ts,level,category,subject_id,message,details,code,params) VALUES (?,?,?,?,?,?,?,?)`,
+		a.TS, a.Level, a.Category, nullString(subjectID), t.Message, det, nullString(t.Code), params)
 	if err != nil {
 		return a, err
 	}
@@ -73,7 +83,7 @@ func (s *Store) QueryActivity(f ActivityFilter) ([]Activity, error) {
 		where = append(where, `ts < ?`)
 		args = append(args, f.Before)
 	}
-	q := `SELECT id,ts,level,category,subject_id,message,details FROM activity`
+	q := `SELECT id,ts,level,category,subject_id,message,details,code,params FROM activity`
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
@@ -91,13 +101,16 @@ func (s *Store) QueryActivity(f ActivityFilter) ([]Activity, error) {
 	out := []Activity{}
 	for rows.Next() {
 		var a Activity
-		var subj, det sql.NullString
-		if err := rows.Scan(&a.ID, &a.TS, &a.Level, &a.Category, &subj, &a.Message, &det); err != nil {
+		var subj, det, code, params sql.NullString
+		if err := rows.Scan(&a.ID, &a.TS, &a.Level, &a.Category, &subj, &a.Message, &det, &code, &params); err != nil {
 			return nil, err
 		}
-		a.SubjectID = subj.String
+		a.SubjectID, a.Code = subj.String, code.String
 		if det.Valid {
 			a.Details = json.RawMessage(det.String)
+		}
+		if params.Valid {
+			_ = json.Unmarshal([]byte(params.String), &a.Params)
 		}
 		out = append(out, a)
 	}

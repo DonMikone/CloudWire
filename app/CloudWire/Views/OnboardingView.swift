@@ -9,13 +9,13 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismissWindow) private var dismissWindow
 
-    private enum Step: Int, CaseIterable {
+    enum Step: Int, CaseIterable {
         case welcome, background, finder, connection
     }
 
     @State private var step: Step = .welcome
     @State private var autostart = true
-    @State private var notificationsAllowed = false
+    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
     @State private var finderEnabled = FIFinderSyncController.isExtensionEnabled
 
     var body: some View {
@@ -38,11 +38,12 @@ struct OnboardingView: View {
                 if step != .welcome {
                     Button("Back") { step = Step(rawValue: step.rawValue - 1) ?? .welcome }
                 }
-                primaryButton
+                stepButtons
             }
             .padding(16)
         }
         .frame(width: 560, height: 420)
+        .modelAlert(model)
     }
 
     private var pageDots: some View {
@@ -56,18 +57,27 @@ struct OnboardingView: View {
     }
 
     @ViewBuilder
-    private var primaryButton: some View {
+    private var stepButtons: some View {
         switch step {
         case .welcome:
             Button("Continue") { step = .background }.keyboardShortcut(.defaultAction)
         case .background:
             Button("Continue") { applyAutostart() }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!model.isConnected)
+                .disabled(!canLeaveBackgroundStep)
         case .finder:
             Button("Continue") { step = .connection }.keyboardShortcut(.defaultAction)
         case .connection:
-            Button("Done") { finish(addConnection: false) }.keyboardShortcut(.defaultAction)
+            Button("Later") { finish(addConnection: false) }
+            Button("Add Connection…") { finish(addConnection: true) }.keyboardShortcut(.defaultAction)
+        }
+    }
+
+    /// The service may still need approval or keep failing; the Overview offers the same fixes later.
+    private var canLeaveBackgroundStep: Bool {
+        switch model.coreState {
+        case .connected, .needsApproval, .failed: true
+        case .idle, .starting: false
         }
     }
 
@@ -81,9 +91,9 @@ struct OnboardingView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 8) {
-                Label("Mounts show cloud folders as drives in Finder.", systemImage: SidebarSection.mounts.symbol)
-                Label("Offline Items keep real local copies, synced in the background.", systemImage: SidebarSection.offline.symbol)
-                Label("Share links from Finder and encrypt folders in Vaults.", systemImage: "lock.shield")
+                Label("Mounts show your cloud folders in Finder, streamed on demand.", systemImage: SidebarSection.mounts.symbol)
+                Label("Offline Items keep real local copies in sync in the background.", systemImage: SidebarSection.offline.symbol)
+                Label("Shares send links straight from Finder, Vaults encrypt folders in the cloud.", systemImage: "lock.shield")
             }
         }
     }
@@ -108,11 +118,18 @@ struct OnboardingView: View {
                             .buttonStyle(.borderedProminent)
                         Button("Check Again") { model.retryStart() }
                     }
+                    laterHint
                 }
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 8) {
-                    InlineError(message: message)
+                    InlineError(message: String(localized: "The background service could not be started."))
+                    Text("CloudWire tries again automatically.")
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                     Button("Try Again") { model.retryStart() }
+                    laterHint
                 }
             default:
                 HStack {
@@ -122,6 +139,10 @@ struct OnboardingView: View {
             }
         }
         .onAppear { model.start() }
+    }
+
+    private var laterHint: some View {
+        Text("You can do this later in the Overview.").font(.caption).foregroundStyle(.secondary)
     }
 
     private var finder: some View {
@@ -140,19 +161,27 @@ struct OnboardingView: View {
             Text("CloudWire tells you about errors, conflicts and deletions that need your decision.")
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("Allow Notifications") {
-                    Task { notificationsAllowed = await NotificationManager.shared.requestAuthorization() }
+                if notificationStatus == .denied {
+                    Button("Open Notification Settings…") { NotificationManager.openSystemSettings() }
+                } else {
+                    Button("Allow Notifications") {
+                        Task {
+                            await NotificationManager.shared.requestAuthorization()
+                            notificationStatus = await NotificationManager.shared.authorizationStatus()
+                        }
+                    }
                 }
-                if notificationsAllowed {
+                if notificationStatus == .authorized {
                     Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                 }
             }
         }
         .task {
-            notificationsAllowed = await NotificationManager.shared.authorizationStatus() == .authorized
+            notificationStatus = await NotificationManager.shared.authorizationStatus()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             finderEnabled = FIFinderSyncController.isExtensionEnabled
+            Task { notificationStatus = await NotificationManager.shared.authorizationStatus() }
         }
     }
 
@@ -161,9 +190,6 @@ struct OnboardingView: View {
             Text("Your First Connection").font(.title.weight(.semibold))
             Text("Connect your Nextcloud with a browser login, or any other cloud supported by rclone.")
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Add Connection…") { finish(addConnection: true) }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
             Text("You can also do this later in the Connections section.")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -172,7 +198,7 @@ struct OnboardingView: View {
     // MARK: Actions
 
     private func applyAutostart() {
-        model.updateSettings(JSONValue.patch(["autostart"], .bool(autostart)))
+        model.setAutostart(autostart)
         step = .finder
     }
 
@@ -187,3 +213,16 @@ struct OnboardingView: View {
         dismissWindow(id: WindowRouter.onboardingID)
     }
 }
+
+#if DEBUG
+// MARK: - Snapshot seams
+
+extension OnboardingView {
+    /// Opens on `step` (`--export-snapshots`).
+    static func snapshot(step: Step) -> OnboardingView {
+        var view = OnboardingView()
+        view._step = State(initialValue: step)
+        return view
+    }
+}
+#endif

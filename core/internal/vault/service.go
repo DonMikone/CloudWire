@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +20,8 @@ import (
 	"github.com/DonMikone/CloudWire/core/internal/activity"
 	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/keychain"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
+	"github.com/DonMikone/CloudWire/core/internal/notify"
 	"github.com/DonMikone/CloudWire/core/internal/offline"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/rcl"
@@ -45,6 +49,12 @@ type Offline interface {
 	PauseForConnection(connID, reason string)
 	ResumeForConnection(connID string)
 	EnqueueMigration(req *offline.MigrationRequest)
+	CancelMigration(jobID string) bool
+}
+
+// Notifier queues notifications.
+type Notifier interface {
+	Notify(kind string, params any)
 }
 
 // Keychain stores vault passwords (replaceable in tests).
@@ -62,10 +72,11 @@ func (systemKeychain) Delete(s, a string) error        { return keychain.Delete(
 
 // Service implements the vaults.* methods.
 type Service struct {
-	st    *store.Store
-	log   *activity.Logger
-	pub   Publisher
-	paths paths.Paths
+	st     *store.Store
+	log    *activity.Logger
+	notify Notifier
+	pub    Publisher
+	paths  paths.Paths
 
 	Mounts   Mounts
 	Offline  Offline
@@ -73,25 +84,34 @@ type Service struct {
 
 	mu         sync.Mutex
 	unlocked   map[string]bool // vault connection ids
-	migrations map[string]*migration
+	migrations map[string]*Migration
 }
 
-type migration struct {
-	JobID      string   `json:"jobId"`
-	VaultID    string   `json:"vaultId"`
-	Status     string   `json:"status"`
-	Mismatches []string `json:"mismatches"`
-	Error      string   `json:"error,omitempty"`
-	connID     string
-	path       string
-	isDir      bool
-	verified   []string // source files proven to be in the Vault
+// Migration is the contract's vault.migration object: a job encrypting
+// existing data into a Vault.
+type Migration struct {
+	JobID        string   `json:"jobId"`
+	VaultID      string   `json:"vaultId"`
+	ConnectionID string   `json:"connectionId"` // source Connection
+	Path         string   `json:"path"`         // source path relative to the Connection
+	IsDir        bool     `json:"isDir"`
+	Status       string   `json:"status"` // queued | running | verified | mismatch | error | deleted | canceled
+	Mismatches   []string `json:"mismatches"`
+	Error        string   `json:"error,omitempty"`
+	Bytes        int64    `json:"bytes"`
+	TotalBytes   int64    `json:"totalBytes"`
+	Transfers    int64    `json:"transfers"`
+	CreatedAt    int64    `json:"createdAt"`
+	vaultName    string
+	verified     []string // source files proven to be in the Vault
 }
+
+func (m *Migration) active() bool { return m.Status == "queued" || m.Status == "running" }
 
 // NewService creates the service.
-func NewService(st *store.Store, log *activity.Logger, pub Publisher, p paths.Paths) *Service {
-	return &Service{st: st, log: log, pub: pub, paths: p, Keychain: systemKeychain{},
-		unlocked: map[string]bool{}, migrations: map[string]*migration{}}
+func NewService(st *store.Store, log *activity.Logger, n Notifier, pub Publisher, p paths.Paths) *Service {
+	return &Service{st: st, log: log, notify: n, pub: pub, paths: p, Keychain: systemKeychain{},
+		unlocked: map[string]bool{}, migrations: map[string]*Migration{}}
 }
 
 // DTO is the contract's Vault object.
@@ -126,7 +146,7 @@ func (s *Service) changed() { s.pub.Publish("vaults.changed", struct{}{}) }
 func (s *Service) Get(id string) (store.Vault, error) {
 	v, err := s.st.Vault(id)
 	if errors.Is(err, store.ErrNotFound) {
-		return v, api.Errorf("vault.notFound", "Vault %s not found", id)
+		return v, api.Fail("vault.notFound", msg.New("vault.notFound", "id", id))
 	}
 	return v, err
 }
@@ -202,14 +222,14 @@ func joinRemote(a, b string) string {
 
 func validName(name string) error {
 	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "/:\\") || name == "." || name == ".." {
-		return api.Invalid("invalid vault name %q", name)
+		return api.InvalidText(msg.New("vault.invalidName", "name", name))
 	}
 	return nil
 }
 
 func validPassword(p string) error {
 	if len([]rune(p)) < MinPasswordLength {
-		return api.Invalid("the password needs at least %d characters", MinPasswordLength)
+		return api.InvalidText(msg.New("vault.passwordTooShort", "count", MinPasswordLength))
 	}
 	return nil
 }
@@ -239,7 +259,10 @@ func (s *Service) fetchFile(remote, vaultPath string) (File, error) {
 		"srcFs": remote + ":", "srcRemote": joinRemote(vaultPath, "vault.json"),
 		"dstFs": filepath.Dir(tmp), "dstRemote": filepath.Base(tmp),
 	}); err != nil {
-		return File{}, api.Errorf("vault.invalidFormat", "Cannot read %s/vault.json: %v", vaultPath, err)
+		if rcl.IsNotFound(err) {
+			return File{}, api.Fail("vault.invalidFormat", msg.New("vault.noVaultFile", "path", vaultPath))
+		}
+		return File{}, api.Fail("vault.ioFailed", msg.New("vault.readFailed", "path", vaultPath, "detail", err))
 	}
 	b, err := os.ReadFile(tmp)
 	if err != nil {
@@ -247,7 +270,7 @@ func (s *Service) fetchFile(remote, vaultPath string) (File, error) {
 	}
 	f, err := Parse(b)
 	if err != nil {
-		return File{}, api.Errorf("vault.invalidFormat", "%v", err)
+		return File{}, api.Wrap("vault.invalidFormat", err)
 	}
 	return f, nil
 }
@@ -292,7 +315,7 @@ func (s *Service) configureCrypt(v store.Vault, parent store.Connection, f File,
 func (s *Service) conn(id string) (store.Connection, error) {
 	c, err := s.st.Connection(id)
 	if err != nil {
-		return c, api.Errorf("connection.notFound", "Connection %s not found", id)
+		return c, api.Fail("connection.notFound", msg.New("connection.notFound", "id", id))
 	}
 	if c.Kind != "remote" {
 		return c, api.Invalid("a Vault must live on a regular Connection")
@@ -347,23 +370,23 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (CreateResult, err
 		Item *struct{} `json:"item"`
 	}
 	if err := rcl.CallInto("operations/stat", map[string]any{"fs": parent.RcloneRemote + ":", "remote": vaultPath}, &st); err == nil && st.Item != nil {
-		return CreateResult{}, api.Errorf("vault.exists", "%s already exists", vaultPath)
+		return CreateResult{}, api.Fail("vault.exists", msg.New("vault.exists", "path", vaultPath))
 	}
 	f, sec, rk, err := New(p.Name, p.Password, time.Now())
 	if err != nil {
 		return CreateResult{}, err
 	}
 	if _, err := rcl.Call("operations/mkdir", map[string]any{"fs": parent.RcloneRemote + ":", "remote": joinRemote(vaultPath, "d")}); err != nil {
-		return CreateResult{}, api.Errorf("vault.invalidFormat", "Cannot create the Vault folder: %v", err)
+		return CreateResult{}, api.Fail("vault.ioFailed", msg.New("vault.createFolderFailed", "detail", err))
 	}
 	if err := s.storeFile(parent.RcloneRemote, vaultPath, f); err != nil {
-		return CreateResult{}, api.Errorf("vault.invalidFormat", "Cannot write vault.json: %v", err)
+		return CreateResult{}, api.Fail("vault.ioFailed", msg.New("vault.writeFailed", "detail", err))
 	}
 	v, err := s.register(parent, vaultPath, p.Name, mode, f, sec, p.Password)
 	if err != nil {
 		return CreateResult{}, err
 	}
-	s.log.Info("vault", v.ID, fmt.Sprintf("Vault %q created at %s", v.Name, vaultPath), nil)
+	s.log.Info("vault", v.ID, msg.New("vault.created", "name", v.Name, "path", vaultPath), nil)
 	return CreateResult{Vault: s.dto(v), RecoveryKey: rk}, nil
 }
 
@@ -376,7 +399,7 @@ func (s *Service) register(parent store.Connection, vaultPath, name, mode string
 	}
 	for _, o := range vs {
 		if o.ConnectionID == parent.ID && o.VaultPath == vaultPath {
-			return store.Vault{}, api.Errorf("vault.exists", "This Vault is already added")
+			return store.Vault{}, api.Fail("vault.alreadyAdded", msg.New("vault.alreadyAdded"))
 		}
 	}
 	connID := store.NewID()
@@ -396,12 +419,12 @@ func (s *Service) register(parent store.Connection, vaultPath, name, mode string
 	}
 	if err := s.configureCrypt(v, parent, f, sec); err != nil {
 		_ = s.st.DeleteVault(v)
-		return v, api.Errorf("vault.invalidFormat", "Cannot configure the Vault: %v", err)
+		return v, api.Fail("vault.invalidFormat", msg.New("vault.configureFailed", "detail", err))
 	}
 	s.setUnlocked(connID, true)
 	if mode == "keychain" {
 		if err := s.Keychain.Set(paths.VaultKeychainService(), v.ID, password); err != nil {
-			s.log.Warn("vault", v.ID, "Could not store the Vault password in the Keychain: "+err.Error(), nil)
+			s.log.Warn("vault", v.ID, msg.New("vault.keychainFailed", "detail", err), nil)
 		}
 	}
 	s.pub.Publish("connections.changed", struct{}{})
@@ -445,16 +468,16 @@ func (s *Service) Open(ctx context.Context, p OpenParams) (DTO, error) {
 	if err != nil {
 		return DTO{}, err
 	}
-	s.log.Info("vault", v.ID, fmt.Sprintf("Vault %q opened", v.Name), nil)
+	s.log.Info("vault", v.ID, msg.New("vault.opened", "name", v.Name), nil)
 	return s.dto(v), nil
 }
 
 func mapUnwrap(err error) error {
 	if errors.Is(err, ErrWrongPassword) {
-		return api.Errorf("vault.wrongPassword", "The password is not correct")
+		return api.Fail("vault.wrongPassword", msg.New("vault.wrongPassword"))
 	}
 	if errors.Is(err, ErrInvalidFormat) {
-		return api.Errorf("vault.invalidFormat", "%v", err)
+		return api.Wrap("vault.invalidFormat", err)
 	}
 	return err
 }
@@ -473,7 +496,7 @@ func (s *Service) Unlock(ctx context.Context, id, password string) (DTO, error) 
 	if password == "" {
 		password, err = s.Keychain.Get(paths.VaultKeychainService(), v.ID)
 		if err != nil {
-			return DTO{}, api.Errorf("vault.locked", "The Vault password is required")
+			return DTO{}, api.Fail("vault.locked", msg.New("vault.passwordRequired"))
 		}
 	}
 	f, err := s.fetchFile(parent.RcloneRemote, v.VaultPath)
@@ -485,7 +508,7 @@ func (s *Service) Unlock(ctx context.Context, id, password string) (DTO, error) 
 		return DTO{}, mapUnwrap(err)
 	}
 	if err := s.configureCrypt(v, parent, f, sec); err != nil {
-		return DTO{}, api.Errorf("vault.invalidFormat", "%v", err)
+		return DTO{}, api.Wrap("vault.invalidFormat", err)
 	}
 	s.setUnlocked(v.VaultConnectionID, true)
 	if v.UnlockMode == "keychain" {
@@ -497,7 +520,7 @@ func (s *Service) Unlock(ctx context.Context, id, password string) (DTO, error) 
 	if s.Offline != nil {
 		s.Offline.ResumeForConnection(v.VaultConnectionID)
 	}
-	s.log.Info("vault", v.ID, fmt.Sprintf("Vault %q unlocked", v.Name), nil)
+	s.log.Info("vault", v.ID, msg.New("vault.unlocked", "name", v.Name), nil)
 	s.changed()
 	return s.dto(v), nil
 }
@@ -517,7 +540,7 @@ func (s *Service) Lock(ctx context.Context, id string) (DTO, error) {
 	_, _ = rcl.Call("config/delete", map[string]any{"name": RemoteName(v.VaultConnectionID)})
 	rcl.ForgetRemote(RemoteName(v.VaultConnectionID))
 	s.setUnlocked(v.VaultConnectionID, false)
-	s.log.Info("vault", v.ID, fmt.Sprintf("Vault %q locked", v.Name), nil)
+	s.log.Info("vault", v.ID, msg.New("vault.locked", "name", v.Name), nil)
 	s.changed()
 	return s.dto(v), nil
 }
@@ -548,12 +571,12 @@ func (s *Service) ChangePassword(ctx context.Context, id, oldPassword, newPasswo
 		return err
 	}
 	if err := s.storeFile(parent.RcloneRemote, v.VaultPath, f); err != nil {
-		return api.Errorf("vault.invalidFormat", "Cannot write vault.json: %v", err)
+		return api.Fail("vault.ioFailed", msg.New("vault.writeFailed", "detail", err))
 	}
 	if v.UnlockMode == "keychain" {
 		_ = s.Keychain.Set(paths.VaultKeychainService(), v.ID, newPassword)
 	}
-	s.log.Info("vault", v.ID, fmt.Sprintf("Password of Vault %q changed", v.Name), nil)
+	s.log.Info("vault", v.ID, msg.New("vault.passwordChanged", "name", v.Name), nil)
 	return nil
 }
 
@@ -583,7 +606,7 @@ func (s *Service) Recover(ctx context.Context, p RecoverParams) (DTO, error) {
 	sec, err := f.UnlockRecovery(p.RecoveryKey)
 	if err != nil {
 		if errors.Is(err, ErrWrongPassword) {
-			return DTO{}, api.Errorf("vault.wrongPassword", "The Recovery Key is not correct")
+			return DTO{}, api.Fail("vault.wrongPassword", msg.New("vault.wrongRecoveryKey"))
 		}
 		return DTO{}, mapUnwrap(err)
 	}
@@ -591,12 +614,12 @@ func (s *Service) Recover(ctx context.Context, p RecoverParams) (DTO, error) {
 		return DTO{}, err
 	}
 	if err := s.storeFile(parent.RcloneRemote, vaultPath, f); err != nil {
-		return DTO{}, api.Errorf("vault.invalidFormat", "Cannot write vault.json: %v", err)
+		return DTO{}, api.Fail("vault.ioFailed", msg.New("vault.writeFailed", "detail", err))
 	}
 	vs, _ := s.st.Vaults()
 	for _, v := range vs {
 		if v.ConnectionID == parent.ID && v.VaultPath == vaultPath {
-			s.log.Info("vault", v.ID, fmt.Sprintf("Vault %q reset with its Recovery Key", v.Name), nil)
+			s.log.Info("vault", v.ID, msg.New("vault.recovered", "name", v.Name), nil)
 			return s.Unlock(ctx, v.ID, p.NewPassword)
 		}
 	}
@@ -633,7 +656,7 @@ func (s *Service) ExportRclone(ctx context.Context, id, password string) (string
 	fmt.Fprintf(&b, "filename_encryption = %s\n", f.Crypt.FilenameEncryption)
 	fmt.Fprintf(&b, "directory_name_encryption = %v\n", f.Crypt.DirectoryNameEncryption)
 	fmt.Fprintf(&b, "filename_encoding = %s\n", f.Crypt.FilenameEncoding)
-	s.log.Info("vault", v.ID, fmt.Sprintf("Emergency rclone configuration of %q exported", v.Name), nil)
+	s.log.Info("vault", v.ID, msg.New("vault.rcloneExported", "name", v.Name), nil)
 	return b.String(), nil
 }
 
@@ -653,11 +676,11 @@ func (s *Service) Remove(ctx context.Context, id string) error {
 	its, _ := s.st.OfflineItems()
 	for _, it := range its {
 		if it.ConnectionID == v.VaultConnectionID {
-			deps = append(deps, map[string]string{"kind": "offline", "id": it.ID, "name": it.StoragePath})
+			deps = append(deps, map[string]string{"kind": "offline", "id": it.ID, "name": offline.ItemName(it)})
 		}
 	}
 	if len(deps) > 0 {
-		return api.Errorf("connection.inUse", "The Vault %q is still used by %d item(s)", v.Name, len(deps)).WithData("dependents", deps)
+		return api.Fail("vault.inUse", msg.New("vault.inUse", "name", v.Name, "count", len(deps))).WithData("dependents", deps)
 	}
 	_ = s.Keychain.Delete(paths.VaultKeychainService(), v.ID)
 	_, _ = rcl.Call("config/delete", map[string]any{"name": RemoteName(v.VaultConnectionID)})
@@ -666,7 +689,7 @@ func (s *Service) Remove(ctx context.Context, id string) error {
 		return err
 	}
 	s.setUnlocked(v.VaultConnectionID, false)
-	s.log.Info("vault", v.ID, fmt.Sprintf("Vault %q removed from this Mac (cloud data unchanged)", v.Name), nil)
+	s.log.Info("vault", v.ID, msg.New("vault.removed", "name", v.Name), nil)
 	s.pub.Publish("connections.changed", struct{}{})
 	s.changed()
 	return nil
@@ -712,18 +735,18 @@ func (s *Service) EncryptExisting(ctx context.Context, p EncryptParams) (Encrypt
 	}
 	src := strings.Trim(p.Path, "/")
 	if src == "" {
-		return EncryptResult{}, api.Invalid("the cloud root cannot be encrypted as a whole")
+		return EncryptResult{}, api.InvalidText(msg.New("vault.cloudRoot"))
 	}
 	its, _ := s.st.OfflineItems()
 	for _, it := range its {
 		if it.ConnectionID == parent.ID && (within(src, it.RemotePath) || within(it.RemotePath, src)) {
-			return EncryptResult{}, api.Errorf("vault.sourceIsOffline", "Remove the Offline Item %s first; its local copy would be re-uploaded", it.StoragePath)
+			return EncryptResult{}, api.Fail("vault.sourceIsOffline", msg.New("vault.sourceIsOffline", "path", it.StoragePath))
 		}
 	}
 	vs, _ := s.st.Vaults()
 	for _, v := range vs {
 		if v.ConnectionID == parent.ID && (within(src, v.VaultPath) || within(v.VaultPath, src)) {
-			return EncryptResult{}, api.Invalid("the source overlaps the Vault %q", v.Name)
+			return EncryptResult{}, api.InvalidText(msg.New("vault.sourceOverlapsVault", "name", v.Name))
 		}
 	}
 	var res EncryptResult
@@ -747,31 +770,63 @@ func (s *Service) EncryptExisting(ctx context.Context, p EncryptParams) (Encrypt
 			return EncryptResult{}, api.Invalid("the Vault lives on another Connection")
 		}
 		if s.IsLocked(v.VaultConnectionID) {
-			return EncryptResult{}, api.Errorf("vault.locked", "Unlock the Vault first")
+			return EncryptResult{}, api.Fail("vault.locked", msg.New("vault.unlockFirst"))
 		}
 		dst = joinRemote(p.Target.SubPath, dst)
 	default:
 		return EncryptResult{}, api.Invalid("target is required")
 	}
-	m := &migration{JobID: store.NewID(), VaultID: v.ID, Status: "queued", Mismatches: []string{}, connID: parent.ID, path: src, isDir: p.IsDir}
+	m := &Migration{JobID: store.NewID(), VaultID: v.ID, ConnectionID: parent.ID, Path: src, IsDir: p.IsDir, Status: "queued",
+		Mismatches: []string{}, CreatedAt: time.Now().UnixMilli(), vaultName: v.Name}
 	s.mu.Lock()
 	s.migrations[m.JobID] = m
 	s.mu.Unlock()
 	res.JobID, res.VaultID = m.JobID, v.ID
 	s.publishMigration(m)
-	s.log.Info("vault", v.ID, fmt.Sprintf("Encrypting %q into Vault %q", "/"+src, v.Name), map[string]string{"jobId": m.JobID})
+	s.log.Info("vault", v.ID, msg.New("vault.encryptStarted", "path", "/"+src, "name", v.Name), map[string]string{"jobId": m.JobID})
 	s.Offline.EnqueueMigration(&offline.MigrationRequest{
 		JobID: m.JobID, VaultID: v.ID, IgnorePause: p.IgnorePauseRules,
 		Job: sv.MigrateJob{SrcFs: parent.RcloneRemote + ":", SrcPath: src, IsDir: p.IsDir, DstFs: RemoteName(v.VaultConnectionID) + ":", DstPath: dst},
 		OnStart: func() {
-			s.updateMigration(m.JobID, func(m *migration) { m.Status = "running" })
+			s.updateMigration(m.JobID, func(m *Migration) bool {
+				if m.Status != "queued" {
+					return false // canceled meanwhile
+				}
+				m.Status = "running"
+				return true
+			})
+		},
+		OnProgress: func(p sv.Msg) {
+			s.updateMigration(m.JobID, func(m *Migration) bool {
+				if !m.active() {
+					return false
+				}
+				m.Bytes, m.TotalBytes, m.Transfers = p.Bytes, p.TotalBytes, p.Transfers
+				return true
+			})
 		},
 		OnResult: func(out sv.Msg) { s.onMigrationResult(m.JobID, v, out) },
 	})
 	return res, nil
 }
 
-func (s *Service) publishMigration(m *migration) {
+// Migrations returns the migrations of this Core run, newest first.
+func (s *Service) Migrations() []Migration {
+	s.mu.Lock()
+	out := make([]Migration, 0, len(s.migrations))
+	for _, m := range s.migrations {
+		cp := *m
+		cp.Mismatches = append([]string{}, m.Mismatches...)
+		out = append(out, cp)
+	}
+	s.mu.Unlock()
+	slices.SortFunc(out, func(a, b Migration) int {
+		return cmp.Or(cmp.Compare(b.CreatedAt, a.CreatedAt), strings.Compare(b.JobID, a.JobID))
+	})
+	return out
+}
+
+func (s *Service) publishMigration(m *Migration) {
 	s.mu.Lock()
 	cp := *m
 	cp.Mismatches = append([]string{}, m.Mismatches...)
@@ -779,20 +834,25 @@ func (s *Service) publishMigration(m *migration) {
 	s.pub.Publish("vault.migration", cp)
 }
 
-func (s *Service) updateMigration(id string, f func(*migration)) {
+// updateMigration applies f and publishes the migration when f reports a
+// change. It returns whether f changed it.
+func (s *Service) updateMigration(id string, f func(*Migration) bool) bool {
 	s.mu.Lock()
 	m := s.migrations[id]
-	if m != nil {
-		f(m)
-	}
+	changed := m != nil && f(m)
 	s.mu.Unlock()
-	if m != nil {
+	if changed {
 		s.publishMigration(m)
 	}
+	return changed
 }
 
 func (s *Service) onMigrationResult(id string, v store.Vault, out sv.Msg) {
-	s.updateMigration(id, func(m *migration) {
+	var src string
+	if !s.updateMigration(id, func(m *Migration) bool {
+		if !m.active() {
+			return false // canceled
+		}
 		switch out.Status {
 		case sv.StatusVerified:
 			m.Status, m.verified = "verified", out.Files
@@ -801,15 +861,45 @@ func (s *Service) onMigrationResult(id string, v store.Vault, out sv.Msg) {
 		default:
 			m.Status, m.Error = "error", out.Error
 		}
-	})
+		src = m.Path
+		return true
+	}) {
+		return
+	}
+	status, count, message := "verified", 0, ""
 	switch out.Status {
 	case sv.StatusVerified:
-		s.log.Info("vault", v.ID, fmt.Sprintf("Encrypted copy in %q verified; waiting for confirmation to delete the original", v.Name), map[string]string{"jobId": id})
+		s.log.Info("vault", v.ID, msg.New("vault.encryptVerified", "name", v.Name), map[string]string{"jobId": id})
 	case sv.StatusMismatch:
-		s.log.Error("vault", v.ID, fmt.Sprintf("Verification of the encrypted copy in %q found %d mismatches; the original is kept", v.Name, len(out.Mismatches)), out.Mismatches)
+		status, count = "mismatch", len(out.Mismatches)
+		s.log.Error("vault", v.ID, msg.New("vault.encryptMismatch", "count", len(out.Mismatches), "name", v.Name), out.Mismatches)
 	default:
-		s.log.Error("vault", v.ID, fmt.Sprintf("Encrypting into %q failed: %s", v.Name, out.Error), nil)
+		status, message = "error", out.Error
+		s.log.Error("vault", v.ID, msg.New("vault.encryptFailed", "name", v.Name, "detail", out.Error), nil)
 	}
+	s.notify.Notify(notify.KindVaultMigration, map[string]any{"jobId": id, "vaultId": v.ID, "vaultName": v.Name,
+		"status": status, "path": src, "count": count, "message": message})
+}
+
+// MigrationCancel stops a queued or running migration. Files already copied
+// into the Vault stay there; the original is untouched.
+func (s *Service) MigrationCancel(ctx context.Context, jobID string) error {
+	s.mu.Lock()
+	m := s.migrations[jobID]
+	active := m != nil && m.active()
+	s.mu.Unlock()
+	if m == nil {
+		return api.Fail("vault.notFound", msg.New("vault.migrationNotFound", "id", jobID))
+	}
+	if !active || !s.Offline.CancelMigration(jobID) {
+		return api.Invalid("only a queued or running job can be canceled")
+	}
+	s.updateMigration(jobID, func(m *Migration) bool {
+		m.Status = "canceled"
+		return true
+	})
+	s.log.Info("vault", m.VaultID, msg.New("vault.encryptCanceled", "path", "/"+m.Path, "name", m.vaultName), map[string]string{"jobId": jobID})
+	return nil
 }
 
 // MigrationConfirmDelete deletes the original after a verified migration.
@@ -822,12 +912,12 @@ func (s *Service) MigrationConfirmDelete(ctx context.Context, jobID string) erro
 	}
 	s.mu.Unlock()
 	if m == nil {
-		return api.Errorf("vault.notFound", "Migration %s not found", jobID)
+		return api.Fail("vault.notFound", msg.New("vault.migrationNotFound", "id", jobID))
 	}
 	if !ok {
 		return api.Invalid("the original can only be deleted after a successful verification")
 	}
-	parent, err := s.conn(m.connID)
+	parent, err := s.conn(m.ConnectionID)
 	if err != nil {
 		return err
 	}
@@ -838,26 +928,30 @@ func (s *Service) MigrationConfirmDelete(ctx context.Context, jobID string) erro
 	// source after the verification stays where it is.
 	fsName := parent.RcloneRemote + ":"
 	var failed []string
-	if m.isDir {
+	if m.IsDir {
 		for _, f := range verified {
-			if _, err := rcl.Call("operations/deletefile", map[string]any{"fs": fsName, "remote": joinRemote(m.path, f)}); err != nil {
+			if _, err := rcl.Call("operations/deletefile", map[string]any{"fs": fsName, "remote": joinRemote(m.Path, f)}); err != nil {
 				failed = append(failed, f)
 			}
 		}
 		// Remove the folders that are empty now; folders with new files stay.
-		_, _ = rcl.Call("operations/rmdirs", map[string]any{"fs": fsName, "remote": m.path, "leaveRoot": false})
+		_, _ = rcl.Call("operations/rmdirs", map[string]any{"fs": fsName, "remote": m.Path, "leaveRoot": false})
 	} else if len(verified) > 0 {
-		if _, err := rcl.Call("operations/deletefile", map[string]any{"fs": fsName, "remote": m.path}); err != nil {
-			failed = append(failed, m.path)
+		if _, err := rcl.Call("operations/deletefile", map[string]any{"fs": fsName, "remote": m.Path}); err != nil {
+			failed = append(failed, m.Path)
 		}
 	}
 	if len(failed) > 0 {
-		return api.Errorf("vault.invalidFormat", "Deleting %d original file(s) failed", len(failed)).WithData("files", failed)
+		return api.Fail("vault.deleteFailed", msg.New("vault.deleteFailed", "count", len(failed), "files", strings.Join(failed, ", "))).
+			WithData("files", failed)
 	}
 	if s.Mounts != nil {
-		s.Mounts.Forget(parent.ID, path.Dir("/" + m.path)[1:])
+		s.Mounts.Forget(parent.ID, path.Dir("/" + m.Path)[1:])
 	}
-	s.updateMigration(jobID, func(m *migration) { m.Status = "deleted" })
-	s.log.Info("vault", m.VaultID, fmt.Sprintf("Original %q deleted after encryption", "/"+m.path), nil)
+	s.updateMigration(jobID, func(m *Migration) bool {
+		m.Status = "deleted"
+		return true
+	})
+	s.log.Info("vault", m.VaultID, msg.New("vault.originalDeleted", "path", "/"+m.Path), nil)
 	return nil
 }

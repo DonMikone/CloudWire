@@ -16,6 +16,14 @@ struct CloudWireApp: App {
                 .environment(model)
         }
         .defaultSize(width: 1100, height: 720)
+        .commands {
+            // Cmd+Q closes the windows; the menu bar icon and the Core keep running.
+            CommandGroup(replacing: .appTermination) {
+                Button("Close Windows") { WindowRouter.shared.closeAllWindows() }
+                    .keyboardShortcut("q")
+                Button("Quit CloudWire Completely…") { WindowRouter.shared.confirmQuitCompletely() }
+            }
+        }
 
         MenuBarExtra(isInserted: $menuBarIcon) {
             MenuBarView()
@@ -30,7 +38,7 @@ struct CloudWireApp: App {
             if let target {
                 ShareWindow(target: target)
                     .environment(model)
-                    .windowLifecycle(WindowRouter.shareID)
+                    .modifier(ActionCapture())
             }
         }
         .windowResizability(.contentSize)
@@ -38,49 +46,20 @@ struct CloudWireApp: App {
         Window("Welcome to CloudWire", id: WindowRouter.onboardingID) {
             OnboardingView()
                 .environment(model)
-                .windowLifecycle(WindowRouter.onboardingID)
+                .modifier(ActionCapture())
         }
         .windowResizability(.contentSize)
 
         Settings {
             SettingsView()
                 .environment(model)
-                .windowLifecycle(WindowRouter.settingsID)
+                .modifier(ActionCapture())
         }
     }
 }
 
-// MARK: - Window lifecycle
-
-extension View {
-    /// Captures the SwiftUI window actions for AppKit callers and reports visibility to the router.
-    /// Every window instance counts on its own, so two share windows never share one entry.
-    func windowLifecycle(_ id: String) -> some View {
-        modifier(WindowLifecycle(id: id))
-    }
-}
-
-private struct WindowLifecycle: ViewModifier {
-    let id: String
-    @State private var instance = UUID()
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
-
-    private var key: String { id + ":" + instance.uuidString }
-
-    func body(content: Content) -> some View {
-        content
-            .onAppear {
-                WindowRouter.shared.capture(openWindow: openWindow, openSettings: openSettings)
-                WindowRouter.shared.windowAppeared(key)
-            }
-            .onDisappear {
-                WindowRouter.shared.windowDisappeared(key)
-            }
-    }
-}
-
-/// Captures window actions without counting as a visible window (menu bar label).
+/// Captures the SwiftUI window actions for AppKit callers. The Dock icon follows the visible
+/// NSWindows (WindowRouter), not SwiftUI view lifecycles.
 struct ActionCapture: ViewModifier {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings

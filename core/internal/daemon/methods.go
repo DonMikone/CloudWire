@@ -13,6 +13,7 @@ import (
 	"github.com/DonMikone/CloudWire/core/internal/buildinfo"
 	"github.com/DonMikone/CloudWire/core/internal/connections"
 	"github.com/DonMikone/CloudWire/core/internal/mounts"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/offline"
 	"github.com/DonMikone/CloudWire/core/internal/rcl"
 	"github.com/DonMikone/CloudWire/core/internal/sharing"
@@ -246,7 +247,7 @@ func (c *Core) registerShares() {
 		ConnectionID string `json:"connectionId"`
 		ID           string `json:"id"`
 	}) (any, error) {
-		return empty(), c.shares.Delete(ctx, p.ConnectionID, p.ID)
+		return c.shares.Delete(ctx, p.ConnectionID, p.ID)
 	}))
 	h("shares.searchSharees", api.Bind(func(ctx context.Context, p struct {
 		ConnectionID string `json:"connectionId"`
@@ -305,6 +306,12 @@ func (c *Core) registerVaults() {
 	}) (any, error) {
 		return empty(), c.vaults.MigrationConfirmDelete(ctx, p.JobID)
 	}))
+	h("vaults.migrations", api.NoParams(func(context.Context) (any, error) { return c.vaults.Migrations(), nil }))
+	h("vaults.migrationCancel", api.Bind(func(ctx context.Context, p struct {
+		JobID string `json:"jobId"`
+	}) (any, error) {
+		return empty(), c.vaults.MigrationCancel(ctx, p.JobID)
+	}))
 }
 
 func (c *Core) registerMisc() {
@@ -353,7 +360,7 @@ func (c *Core) exportActivity(format, path string) (int, error) {
 	// truncated file where the user's file was.
 	f, err := os.CreateTemp(filepath.Dir(path), ".cloudwire-export-*")
 	if err != nil {
-		return 0, api.Errorf("core.internal", "cannot write %s: %v", path, err)
+		return 0, api.Fail("core.internal", msg.New("path.writeFailed", "path", path, "detail", err))
 	}
 	tmp := f.Name()
 	defer func() {
@@ -386,7 +393,7 @@ func (c *Core) exportActivity(format, path string) (int, error) {
 		return 0, err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return 0, api.Errorf("core.internal", "cannot write %s: %v", path, err)
+		return 0, api.Fail("core.internal", msg.New("path.writeFailed", "path", path, "detail", err))
 	}
 	return len(entries), nil
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/sharing"
 )
@@ -73,7 +74,7 @@ func (c *Core) resolvePath(local string) (Resolved, error) {
 			Context: "offline", ItemID: it.ID}, len(it.StoragePath)
 	}
 	if bestLen < 0 {
-		return best, api.Errorf("connection.notFound", "%s is not inside a Mount or Offline Item", local)
+		return best, api.Fail("connection.notFound", msg.New("connection.pathNotFound", "path", local))
 	}
 	if conn, err := c.st.Connection(best.ConnectionID); err == nil {
 		best.IsVault = conn.Kind == "vault"

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
 
@@ -17,6 +18,9 @@ const (
 	KindError      = "error"
 	KindConflict   = "conflict"
 	KindMassDelete = "massDelete"
+	// KindVaultMigration reports the end of a Vault encryption job; the user
+	// started it and waits for it, so it cannot be turned off.
+	KindVaultMigration = "vaultMigration"
 )
 
 // AppBundleID is launched to deliver notifications.
@@ -56,8 +60,16 @@ func enabled(s store.Settings, kind string) bool {
 		return s.Notifications.Conflicts
 	case KindMassDelete:
 		return s.Notifications.MassDelete
+	case KindVaultMigration:
+		return true
 	}
 	return false
+}
+
+// ErrorParams are the params of a KindError notification about subjectID,
+// titled with the element's name; its body is t (package msg).
+func ErrorParams(title, subjectID string, t msg.Text) map[string]any {
+	return map[string]any{"title": title, "subjectId": subjectID, "message": t.Message, "code": t.Code, "params": t.Params}
 }
 
 // Notify queues a notification of kind if enabled in the settings.

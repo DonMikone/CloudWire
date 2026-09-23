@@ -14,6 +14,7 @@ import (
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
 	"github.com/DonMikone/CloudWire/core/internal/api"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/rcl"
 	"github.com/DonMikone/CloudWire/core/internal/sharing/nextcloud"
 	"github.com/DonMikone/CloudWire/core/internal/store"
@@ -32,22 +33,48 @@ type Service struct {
 	conns Connections
 	// Now is the clock (tests).
 	Now func() time.Time
+	// RC runs an rclone rc method (tests).
+	RC func(method string, in any) (map[string]any, error)
 }
 
 // New creates the service.
 func New(st *store.Store, log *activity.Logger, conns Connections) *Service {
-	return &Service{st: st, log: log, conns: conns, Now: time.Now}
+	return &Service{st: st, log: log, conns: conns, Now: time.Now, RC: rcl.Call}
 }
 
 // Capabilities are the share features of a Connection.
 type Capabilities struct {
-	PublicLink   bool   `json:"publicLink"`
-	InternalLink bool   `json:"internalLink"`
-	UserShare    bool   `json:"userShare"`
-	EmailShare   bool   `json:"emailShare"`
-	WebURL       bool   `json:"webURL"`
-	Manage       bool   `json:"manage"`
-	Reason       string `json:"reason,omitempty"`
+	PublicLink   bool `json:"publicLink"`
+	InternalLink bool `json:"internalLink"`
+	UserShare    bool `json:"userShare"`
+	EmailShare   bool `json:"emailShare"`
+	WebURL       bool `json:"webURL"`
+	Manage       bool `json:"manage"`
+	// LinkExpiry: public links can expire (Nextcloud, rclone backends in linkExpiryBackends).
+	LinkExpiry bool   `json:"linkExpiry"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// linkExpiryBackends are the rclone backends whose PublicLink passes the
+// expiry to the provider (rclone v1.75 backend sources). Not listed: dropbox
+// (silently drops the expiry on accounts that may not set one), s3 (presigned
+// links always expire, after at most 7 days), imagekit (signed URLs, no
+// "never"), and every backend that ignores the expiry.
+var linkExpiryBackends = map[string]bool{
+	"filescom": true, // Bundle ExpiresAt
+	"gofile":   true, // directlinks ExpireTime
+	"onedrive": true, // createLink expirationDateTime
+	"pikpak":   true, // share ExpirationDays
+	"storj":    true, // access grant NotAfter
+}
+
+// linkUnlinkBackends are the rclone backends whose PublicLink can remove a
+// link again (`unlink`, rclone v1.75 backend sources); the others ignore it.
+var linkUnlinkBackends = map[string]bool{
+	"gofile":     true,
+	"jottacloud": true,
+	"pixeldrain": true,
+	"yandex":     true,
 }
 
 type target struct {
@@ -66,7 +93,7 @@ func (s *Service) target(connID string) (target, error) {
 		return target{}, err
 	}
 	if conn.Kind == "vault" {
-		return target{conn: conn}, api.Errorf("share.unsupported", "Sharing is not available inside a Vault because its files are encrypted")
+		return target{conn: conn}, api.Fail("share.unsupported", msg.New("share.vaultUnsupported"))
 	}
 	cfg, err := s.conns.Config(conn)
 	if err != nil {
@@ -76,11 +103,11 @@ func (s *Service) target(connID string) (target, error) {
 	if isNextcloud(conn, cfg) {
 		base, root, err := nextcloud.DAVLocation(cfg["url"])
 		if err != nil {
-			return t, api.Errorf("share.failed", "%v", err)
+			return t, api.Wrap("share.failed", err)
 		}
 		pass, err := obscure.Reveal(cfg["pass"])
 		if err != nil {
-			return t, api.Errorf("share.failed", "cannot read the app password: %v", err)
+			return t, api.Fail("share.failed", msg.New("share.appPasswordUnreadable", "detail", err))
 		}
 		t.nc = &nextcloud.Client{Base: base, User: cfg["user"], Pass: pass, DAVURL: cfg["url"]}
 		t.root = root
@@ -99,16 +126,16 @@ func (s *Service) Capabilities(ctx context.Context, connID string) (Capabilities
 		return Capabilities{}, err
 	}
 	if t.nc != nil {
-		return Capabilities{PublicLink: true, InternalLink: true, UserShare: true, EmailShare: true, WebURL: true, Manage: true}, nil
+		return Capabilities{PublicLink: true, InternalLink: true, UserShare: true, EmailShare: true, WebURL: true, Manage: true, LinkExpiry: true}, nil
 	}
 	var info struct {
 		Features map[string]bool `json:"Features"`
 	}
 	if err := rcl.CallInto("operations/fsinfo", map[string]any{"fs": t.conn.RcloneRemote + ":"}, &info); err != nil {
-		return Capabilities{}, api.Errorf("share.failed", "%v", err)
+		return Capabilities{}, api.Wrap("share.failed", err)
 	}
 	if info.Features["PublicLink"] {
-		return Capabilities{PublicLink: true, Manage: true}, nil
+		return Capabilities{PublicLink: true, Manage: true, LinkExpiry: linkExpiryBackends[t.conn.Provider]}, nil
 	}
 	return Capabilities{Reason: "unsupported"}, nil
 }
@@ -138,7 +165,7 @@ func (s *Service) mapErr(ctx context.Context, t target, err error) error {
 		return err
 	}
 	if nextcloud.IsPolicyError(err) {
-		e := api.Errorf("share.serverPolicy", "%v", err)
+		e := api.Wrap("share.serverPolicy", err)
 		if t.nc != nil {
 			if pol, perr := t.nc.Policy(ctx); perr == nil {
 				e = e.WithData("policy", pol)
@@ -146,7 +173,7 @@ func (s *Service) mapErr(ctx context.Context, t target, err error) error {
 		}
 		return e
 	}
-	return api.Errorf("share.failed", "%v", err)
+	return api.Wrap("share.failed", err)
 }
 
 // Share is the contract's Share object.
@@ -236,21 +263,22 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Share, error) {
 	path := strings.Trim(p.Path, "/")
 	if t.nc == nil {
 		if p.Kind != "publicLink" {
-			return Share{}, api.Errorf("share.unsupported", "This provider only supports public links")
+			return Share{}, api.Fail("share.unsupported", msg.New("share.publicLinksOnly"))
 		}
 		return s.createRcloneLink(t, path, p.ExpireDate)
 	}
 	cp := nextcloud.CreateParams{Path: t.ocsPath(path), Permissions: p.Permissions, Password: p.Password,
 		ExpireDate: p.ExpireDate, HideDownload: p.HideDownload, Label: p.Label, Note: p.Note, ShareWith: p.ShareWith, SendMail: p.SendMail}
+	var created string // activity code
 	switch p.Kind {
 	case "publicLink":
-		cp.ShareType = nextcloud.ShareTypeLink
+		cp.ShareType, created = nextcloud.ShareTypeLink, "share.linkCreated"
 	case "user":
-		cp.ShareType = nextcloud.ShareTypeUser
+		cp.ShareType, created = nextcloud.ShareTypeUser, "share.createdUser"
 	case "group":
-		cp.ShareType = nextcloud.ShareTypeGroup
+		cp.ShareType, created = nextcloud.ShareTypeGroup, "share.createdGroup"
 	case "email":
-		cp.ShareType = nextcloud.ShareTypeEmail
+		cp.ShareType, created = nextcloud.ShareTypeEmail, "share.createdEmail"
 	default:
 		return Share{}, api.Invalid("unknown share kind %q", p.Kind)
 	}
@@ -262,35 +290,35 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Share, error) {
 		return Share{}, s.mapErr(ctx, t, err)
 	}
 	sh.Path = t.relPath(sh.Path)
-	s.log.Info("share", t.conn.ID, fmt.Sprintf("Created %s share for %q", p.Kind, "/"+path), map[string]any{"shareId": sh.ID})
+	s.log.Info("share", t.conn.ID, msg.New(created, "path", "/"+path), map[string]any{"shareId": sh.ID})
 	return sh, nil
 }
 
 func (s *Service) createRcloneLink(t target, path, expireDate string) (Share, error) {
 	in := map[string]any{"fs": t.conn.RcloneRemote + ":", "remote": path}
 	var expires *int64
-	if expireDate != "" {
+	// Backends that ignore the expiry get none: a stored date would promise an expiry that never happens.
+	if expireDate != "" && linkExpiryBackends[t.conn.Provider] {
 		d, _ := time.ParseInLocation("2006-01-02", expireDate, time.Local)
 		end := d.Add(24*time.Hour - time.Second)
 		days := int(math.Ceil(end.Sub(s.Now()).Hours() / 24))
 		if days < 1 {
-			return Share{}, api.Invalid("expireDate must be in the future")
+			return Share{}, api.InvalidText(msg.New("share.expiryInPast"))
 		}
 		in["expire"] = fmt.Sprintf("%dd", days)
 		ms := end.UnixMilli()
 		expires = &ms
 	}
-	var res struct {
-		URL string `json:"url"`
+	res, err := s.RC("operations/publiclink", in)
+	if err != nil {
+		return Share{}, api.Wrap("share.failed", err)
 	}
-	if err := rcl.CallInto("operations/publiclink", in, &res); err != nil {
-		return Share{}, api.Errorf("share.failed", "%v", err)
-	}
-	l := store.LinkEntry{ID: store.NewID(), ConnectionID: t.conn.ID, RemotePath: path, URL: res.URL, ExpiresAt: expires, CreatedAt: store.Now()}
+	url, _ := res["url"].(string)
+	l := store.LinkEntry{ID: store.NewID(), ConnectionID: t.conn.ID, RemotePath: path, URL: url, ExpiresAt: expires, CreatedAt: store.Now()}
 	if err := s.st.InsertLink(l); err != nil {
 		return Share{}, err
 	}
-	s.log.Info("share", t.conn.ID, fmt.Sprintf("Created public link for %q", "/"+path), nil)
+	s.log.Info("share", t.conn.ID, msg.New("share.linkCreated", "path", "/"+path), nil)
 	return linkShare(l), nil
 }
 
@@ -313,7 +341,7 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (Share, error) {
 		return Share{}, err
 	}
 	if t.nc == nil {
-		return Share{}, api.Errorf("share.unsupported", "Links of this provider cannot be edited; delete and recreate it")
+		return Share{}, api.Fail("share.unsupported", msg.New("share.linkNotEditable"))
 	}
 	if p.ExpireDate != nil {
 		if err := validDate(*p.ExpireDate); err != nil {
@@ -326,39 +354,55 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (Share, error) {
 		return Share{}, s.mapErr(ctx, t, err)
 	}
 	sh.Path = t.relPath(sh.Path)
-	s.log.Info("share", t.conn.ID, fmt.Sprintf("Updated share %s", p.ID), nil)
+	s.log.Info("share", t.conn.ID, msg.New("share.updated", "id", p.ID), nil)
 	return sh, nil
 }
 
+// DeleteResult is shares.delete's result.
+type DeleteResult struct {
+	// RemoteStillActive: removed from CloudWire only; the provider still serves
+	// the rclone link (unlink failed or is not supported by the backend).
+	RemoteStillActive bool `json:"remoteStillActive"`
+}
+
 // Delete removes a Share.
-func (s *Service) Delete(ctx context.Context, connID, id string) error {
+func (s *Service) Delete(ctx context.Context, connID, id string) (DeleteResult, error) {
 	t, err := s.target(connID)
 	if err != nil {
-		return err
+		return DeleteResult{}, err
 	}
 	if t.nc != nil {
 		if err := t.nc.DeleteShare(ctx, id); err != nil {
-			return s.mapErr(ctx, t, err)
+			return DeleteResult{}, s.mapErr(ctx, t, err)
 		}
-		s.log.Info("share", connID, fmt.Sprintf("Deleted share %s", id), nil)
-		return nil
+		s.log.Info("share", connID, msg.New("share.deleted", "id", id), nil)
+		return DeleteResult{}, nil
 	}
 	links, err := s.st.Links(connID, nil)
 	if err != nil {
-		return err
+		return DeleteResult{}, err
 	}
 	for _, l := range links {
-		if l.ID == id {
-			// rclone cannot unlink on every backend; the registry entry goes regardless.
-			_, _ = rcl.Call("operations/publiclink", map[string]any{"fs": t.conn.RcloneRemote + ":", "remote": l.RemotePath, "unlink": true})
-			if err := s.st.DeleteLink(id); err != nil {
-				return err
-			}
-			s.log.Info("share", connID, fmt.Sprintf("Deleted public link for %q", "/"+l.RemotePath), nil)
-			return nil
+		if l.ID != id {
+			continue
 		}
+		stillActive := !linkUnlinkBackends[t.conn.Provider]
+		if !stillActive {
+			_, err := s.RC("operations/publiclink", map[string]any{"fs": t.conn.RcloneRemote + ":", "remote": l.RemotePath, "unlink": true})
+			stillActive = err != nil
+		}
+		// The registry entry goes regardless.
+		if err := s.st.DeleteLink(id); err != nil {
+			return DeleteResult{}, err
+		}
+		if stillActive {
+			s.log.Warn("share", connID, msg.New("share.linkRemovedLocally", "path", "/"+l.RemotePath), nil)
+		} else {
+			s.log.Info("share", connID, msg.New("share.linkDeleted", "path", "/"+l.RemotePath), nil)
+		}
+		return DeleteResult{RemoteStillActive: stillActive}, nil
 	}
-	return api.Errorf("share.notFound", "Share %s not found", id)
+	return DeleteResult{}, api.Fail("share.notFound", msg.New("share.notFound", "id", id))
 }
 
 // SearchSharees searches users, groups and email addresses.
@@ -368,7 +412,7 @@ func (s *Service) SearchSharees(ctx context.Context, connID, search, itemType st
 		return nil, err
 	}
 	if t.nc == nil {
-		return nil, api.Errorf("share.unsupported", "Sharing with people is only available for Nextcloud and ownCloud")
+		return nil, api.Fail("share.unsupported", msg.New("share.peopleUnsupported"))
 	}
 	if itemType != "file" {
 		itemType = "folder"
@@ -387,7 +431,7 @@ func (s *Service) InternalLink(ctx context.Context, connID, path string) (string
 		return "", err
 	}
 	if t.nc == nil {
-		return "", api.Errorf("share.unsupported", "Internal links are only available for Nextcloud and ownCloud")
+		return "", api.Fail("share.unsupported", msg.New("share.internalLinkUnsupported"))
 	}
 	u, err := t.nc.InternalLink(ctx, t.ocsPath(path))
 	return u, s.mapErr(ctx, t, err)
@@ -400,7 +444,7 @@ func (s *Service) WebURL(ctx context.Context, connID, path string) (string, erro
 		return "", err
 	}
 	if t.nc == nil {
-		return "", api.Errorf("share.unsupported", "Opening in the browser is only available for Nextcloud and ownCloud")
+		return "", api.Fail("share.unsupported", msg.New("share.browserUnsupported"))
 	}
 	var st struct {
 		Item *struct {
@@ -477,7 +521,7 @@ func (s *Service) CopyPublicLink(ctx context.Context, connID, path string) (Copy
 		return CopyLinkResult{}, s.mapErr(ctx, t, err)
 	}
 	if pol.PasswordEnforced {
-		return CopyLinkResult{}, api.Errorf("share.serverPolicy", "The server requires a password for public links").WithData("policy", pol)
+		return CopyLinkResult{}, api.Fail("share.serverPolicy", msg.New("share.passwordRequired")).WithData("policy", pol)
 	}
 	cp := nextcloud.CreateParams{Path: t.ocsPath(path), ShareType: nextcloud.ShareTypeLink, Permissions: nextcloud.PermRead}
 	if pol.ExpireDateEnforced && pol.ExpireDateDays > 0 {
@@ -487,6 +531,6 @@ func (s *Service) CopyPublicLink(ctx context.Context, connID, path string) (Copy
 	if err != nil {
 		return CopyLinkResult{}, s.mapErr(ctx, t, err)
 	}
-	s.log.Info("share", connID, fmt.Sprintf("Created public link for %q", "/"+path), map[string]any{"shareId": sh.ID})
+	s.log.Info("share", connID, msg.New("share.linkCreated", "path", "/"+path), map[string]any{"shareId": sh.ID})
 	return CopyLinkResult{URL: sh.URL, Created: true}, nil
 }

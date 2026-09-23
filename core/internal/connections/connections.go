@@ -5,7 +5,6 @@ package connections
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sort"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
 	"github.com/DonMikone/CloudWire/core/internal/api"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/rcl"
 	"github.com/DonMikone/CloudWire/core/internal/sharing/nextcloud"
@@ -143,7 +143,7 @@ func (s *Service) Describe(c store.Connection) DTO {
 func (s *Service) Get(id string) (store.Connection, error) {
 	c, err := s.st.Connection(id)
 	if errors.Is(err, store.ErrNotFound) {
-		return c, api.Errorf("connection.notFound", "Connection %s not found", id)
+		return c, api.Fail("connection.notFound", msg.New("connection.notFound", "id", id))
 	}
 	return c, err
 }
@@ -168,14 +168,14 @@ func (s *Service) ValidateName(name, exceptID string) error {
 		return api.Invalid("name is required")
 	}
 	if strings.ContainsAny(name, "/:") || name == "." || name == ".." {
-		return api.Errorf("connection.nameReserved", "The name %q cannot be used as a folder name", name)
+		return api.Fail("connection.nameReserved", msg.New("connection.nameNotFolder", "name", name))
 	}
 	if c, err := s.st.ConnectionByName(name); err == nil && c.ID != exceptID {
-		return api.Errorf("connection.nameTaken", "A connection named %q already exists", name)
+		return api.Fail("connection.nameTaken", msg.New("connection.nameTaken", "name", name))
 	}
 	for id, p := range s.pending {
 		if id != exceptID && strings.EqualFold(p.name, name) {
-			return api.Errorf("connection.nameTaken", "A connection named %q is being set up", name)
+			return api.Fail("connection.nameTaken", msg.New("connection.namePending", "name", name))
 		}
 	}
 	st, err := s.st.Settings()
@@ -183,20 +183,27 @@ func (s *Service) ValidateName(name, exceptID string) error {
 		return err
 	}
 	if filepath.Clean(filepath.Join(s.paths.Expand(st.BaseFolder), name)) == filepath.Clean(s.paths.Expand(st.MountFolder)) {
-		return api.Errorf("connection.nameReserved", "The name %q is reserved for the Mount folder", name)
+		return api.Fail("connection.nameReserved", msg.New("connection.nameMountFolder", "name", name))
 	}
 	return nil
 }
 
 // ConfigStep is the contract's ConfigStep object.
 type ConfigStep struct {
-	ConnectionID string `json:"connectionId"`
-	Done         bool   `json:"done"`
-	Pending      bool   `json:"pending"`
-	State        string `json:"state"`
-	Option       any    `json:"option"`
-	Error        string `json:"error"`
-	Connection   *DTO   `json:"connection"`
+	ConnectionID string     `json:"connectionId"`
+	Done         bool       `json:"done"`
+	Pending      bool       `json:"pending"`
+	State        string     `json:"state"`
+	Option       any        `json:"option"`
+	Error        string     `json:"error"`
+	ErrorCode    string     `json:"errorCode,omitempty"`
+	ErrorParams  msg.Params `json:"errorParams,omitempty"`
+	Connection   *DTO       `json:"connection"`
+}
+
+// failedStep is the ConfigStep of connection id that failed with t.
+func failedStep(id string, t msg.Text) ConfigStep {
+	return ConfigStep{ConnectionID: id, Error: t.Message, ErrorCode: t.Code, ErrorParams: t.Params}
 }
 
 type configOut struct {
@@ -250,7 +257,7 @@ func (s *Service) Continue(ctx context.Context, p ContinueParams) (ConfigStep, e
 	_, ok := s.pending[p.ConnectionID]
 	s.mu.Unlock()
 	if !ok {
-		return ConfigStep{}, api.Errorf("connection.notFound", "No connection setup in progress for %s", p.ConnectionID)
+		return ConfigStep{}, api.Fail("connection.notFound", msg.New("connection.setupNotFound", "id", p.ConnectionID))
 	}
 	return s.runStep(p.ConnectionID, "config/update", map[string]any{
 		"name": RemoteName(p.ConnectionID), "parameters": map[string]any{},
@@ -269,7 +276,7 @@ func (s *Service) runStep(id, method string, in map[string]any) ConfigStep {
 		select {
 		case step = <-ch:
 		case <-time.After(10 * time.Minute):
-			step = ConfigStep{ConnectionID: id, Error: "The sign-in timed out."}
+			step = failedStep(id, msg.New("connection.signInTimedOut"))
 			s.abandon(id)
 		}
 		select {
@@ -290,18 +297,23 @@ func (s *Service) callStep(id, method string, in map[string]any) ConfigStep {
 	var out configOut
 	if err := rcl.CallInto(method, in, &out); err != nil {
 		s.abandon(id)
-		return ConfigStep{ConnectionID: id, Error: err.Error()}
+		return failedStep(id, api.TextOf(err))
 	}
 	if out.State != "" {
-		return ConfigStep{ConnectionID: id, State: out.State, Option: out.Option, Error: out.Error}
+		step := ConfigStep{ConnectionID: id, State: out.State, Option: out.Option}
+		if out.Error != "" {
+			t := msg.Detail(out.Error)
+			step.Error, step.ErrorCode, step.ErrorParams = t.Message, t.Code, t.Params
+		}
+		return step
 	}
 	if out.Error != "" {
 		s.abandon(id)
-		return ConfigStep{ConnectionID: id, Error: out.Error}
+		return failedStep(id, msg.Detail(out.Error))
 	}
 	c, err := s.finish(id)
 	if err != nil {
-		return ConfigStep{ConnectionID: id, Error: err.Error()}
+		return failedStep(id, api.TextOf(err))
 	}
 	d := s.Describe(c)
 	return ConfigStep{ConnectionID: id, Done: true, Connection: &d}
@@ -313,17 +325,17 @@ func (s *Service) finish(id string) (store.Connection, error) {
 	delete(s.pending, id)
 	s.mu.Unlock()
 	if !ok {
-		return store.Connection{}, errors.New("connection setup was cancelled")
+		return store.Connection{}, api.Fail("connection.notFound", msg.New("connection.setupCancelled"))
 	}
 	c := store.Connection{ID: id, Name: p.name, Kind: "remote", RcloneRemote: RemoteName(id), Provider: p.provider, CreatedAt: store.Now()}
 	if err := s.st.InsertConnection(c); err != nil {
 		_, _ = rcl.Call("config/delete", map[string]any{"name": RemoteName(id)})
 		if store.IsUniqueViolation(err) {
-			return c, api.Errorf("connection.nameTaken", "A connection named %q already exists", p.name)
+			return c, api.Fail("connection.nameTaken", msg.New("connection.nameTaken", "name", p.name))
 		}
 		return c, err
 	}
-	s.log.Info("connection", id, fmt.Sprintf("Connection %q added (%s)", c.Name, c.Provider), nil)
+	s.log.Info("connection", id, msg.New("connection.added", "name", c.Name, "provider", c.Provider), nil)
 	s.pub.Publish("connections.changed", struct{}{})
 	return c, nil
 }
@@ -412,7 +424,7 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (DTO, error) {
 		}
 		if _, err := rcl.Call("config/update", map[string]any{"name": c.RcloneRemote, "parameters": params,
 			"opt": map[string]any{"nonInteractive": true, "obscure": true}}); err != nil {
-			return DTO{}, api.Errorf("connection.testFailed", "%v", err)
+			return DTO{}, api.Wrap("connection.testFailed", err)
 		}
 		rcl.ForgetRemote(c.RcloneRemote)
 		if s.Mounts != nil {
@@ -420,7 +432,7 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (DTO, error) {
 		}
 	}
 	c, _ = s.st.Connection(c.ID)
-	s.log.Info("connection", c.ID, fmt.Sprintf("Connection %q updated", c.Name), nil)
+	s.log.Info("connection", c.ID, msg.New("connection.updated", "name", c.Name), nil)
 	s.pub.Publish("connections.changed", struct{}{})
 	return s.Describe(c), nil
 }
@@ -472,14 +484,14 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if c.Kind == "vault" {
-		return api.Errorf("connection.inUse", "Remove the Vault instead")
+		return api.Fail("connection.inUse", msg.New("connection.removeVault"))
 	}
 	deps, err := s.Dependents(id)
 	if err != nil {
 		return err
 	}
 	if len(deps) > 0 {
-		return api.Errorf("connection.inUse", "%q is still used by %d item(s)", c.Name, len(deps)).WithData("dependents", deps)
+		return api.Fail("connection.inUse", msg.New("connection.inUse", "name", c.Name, "count", len(deps))).WithData("dependents", deps)
 	}
 	cfg, _ := s.Config(c)
 	if err := s.st.DeleteLinksForConnection(id); err != nil {
@@ -495,7 +507,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if c.Provider == "webdav" && (cfg["vendor"] == "nextcloud" || cfg["vendor"] == "owncloud") {
 		go revokeAppPassword(cfg)
 	}
-	s.log.Info("connection", id, fmt.Sprintf("Connection %q removed", c.Name), nil)
+	s.log.Info("connection", id, msg.New("connection.removed", "name", c.Name), nil)
 	s.pub.Publish("connections.changed", struct{}{})
 	return nil
 }
@@ -539,7 +551,7 @@ func testRemote(fsName string) (TestResult, error) {
 		Features map[string]bool `json:"Features"`
 	}
 	if err := rcl.CallInto("operations/fsinfo", map[string]any{"fs": fsName}, &info); err != nil {
-		return TestResult{}, api.Errorf("connection.testFailed", "%v", err)
+		return TestResult{}, api.Wrap("connection.testFailed", err)
 	}
 	if info.Features["About"] {
 		var about struct {
@@ -552,7 +564,7 @@ func testRemote(fsName string) (TestResult, error) {
 		}
 	}
 	if _, err := rcl.Call("operations/list", map[string]any{"fs": fsName, "remote": "", "opt": map[string]any{"dirsOnly": true}}); err != nil {
-		return TestResult{}, api.Errorf("connection.testFailed", "%v", err)
+		return TestResult{}, api.Wrap("connection.testFailed", err)
 	}
 	return TestResult{OK: true}, nil
 }
@@ -585,7 +597,7 @@ func (s *Service) Browse(ctx context.Context, connID, dir string) ([]Entry, erro
 	}
 	dir = strings.Trim(dir, "/")
 	if err := rcl.CallInto("operations/list", map[string]any{"fs": c.RcloneRemote + ":", "remote": dir}, &res); err != nil {
-		return nil, api.Errorf("connection.testFailed", "%v", err)
+		return nil, api.Wrap("connection.testFailed", err)
 	}
 	out := make([]Entry, 0, len(res.List))
 	for _, e := range res.List {

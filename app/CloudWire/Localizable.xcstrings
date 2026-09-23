@@ -11,12 +11,67 @@
         }
       }
     },
+    "%@ already exists" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ existiert bereits"
+          }
+        }
+      }
+    },
     "%@ does not exist." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ existiert nicht."
+          }
+        }
+      }
+    },
+    "%@ has no vault.json" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ enthält keine vault.json"
+          }
+        }
+      }
+    },
+    "%@ is already a mounted volume" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ist bereits ein eingebundenes Volume"
+          }
+        }
+      }
+    },
+    "%@ is not inside a Mount or Offline Item" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ liegt in keinem Laufwerk und keinem Offline-Element"
+          }
+        }
+      }
+    },
+    "%@ is used by another volume" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ wird von einem anderen Volume verwendet"
           }
         }
       }
@@ -51,6 +106,38 @@
         }
       }
     },
+    "%@ offers no Nextcloud login. Is this the address of a Nextcloud server?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ bietet keine Nextcloud-Anmeldung an. Ist das die Adresse eines Nextcloud-Servers?"
+          }
+        }
+      }
+    },
+    "%@ overlaps the Offline Item stored at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ überschneidet sich mit dem Offline-Element in %2$@"
+          }
+        }
+      }
+    },
+    "%@ transferred" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ übertragen"
+          }
+        }
+      }
+    },
     "%@ · %@" : {
       "localizations" : {
         "de" : {
@@ -61,12 +148,83 @@
         }
       }
     },
-    "%@: %lld transferred, %lld deleted, %lld conflicts" : {
+    "%lld conflict copies created in “%@”" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@: %2$lld übertragen, %3$lld gelöscht, %4$lld Konflikte"
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Konfliktkopie in „%2$@“ angelegt"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Konfliktkopien in „%2$@“ angelegt"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld conflict copy created in “%@”"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld conflict copies created in “%@”"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld conflicts" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Konflikt"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Konflikte"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld conflict"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld conflicts"
+                }
+              }
+            }
           }
         }
       }
@@ -151,6 +309,16 @@
         }
       }
     },
+    "%lld deleted" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld gelöscht"
+          }
+        }
+      }
+    },
     "%lld entries saved to %@." : {
       "localizations" : {
         "de" : {
@@ -161,12 +329,42 @@
         }
       }
     },
-    "%lld GB" : {
+    "%lld files" : {
       "localizations" : {
         "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld GB"
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Datei"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Dateien"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld file"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld files"
+                }
+              }
+            }
           }
         }
       }
@@ -211,6 +409,26 @@
         }
       }
     },
+    "%lld of %lld files were deleted in the cloud. Syncing would delete them in the local copy as well." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld von %2$lld Dateien wurden in der Cloud gelöscht. Die Synchronisation würde sie auch in der lokalen Kopie löschen."
+          }
+        }
+      }
+    },
+    "%lld of %lld files were deleted in the local copy. Syncing would delete them in the cloud as well." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld von %2$lld Dateien wurden in der lokalen Kopie gelöscht. Die Synchronisation würde sie auch in der Cloud löschen."
+          }
+        }
+      }
+    },
     "%lld of %lld mounted" : {
       "localizations" : {
         "de" : {
@@ -237,6 +455,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld in Synchronisation"
+          }
+        }
+      }
+    },
+    "%lld transferred" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld übertragen"
           }
         }
       }
@@ -271,7 +499,29 @@
         }
       }
     },
-    "A Mount shows a cloud folder as a drive in Finder. Files download when you open them." : {
+    "A connection named “%@” already exists" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Verbindung namens „%@“ existiert bereits"
+          }
+        }
+      }
+    },
+    "A connection named “%@” is being set up" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Verbindung namens „%@“ wird gerade eingerichtet"
+          }
+        }
+      }
+    },
+    "A Mount shows a cloud folder in Finder. Files download when you open them." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -331,6 +581,16 @@
         }
       }
     },
+    "Actions for “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktionen für „%@“"
+          }
+        }
+      }
+    },
     "Activity" : {
       "localizations" : {
         "de" : {
@@ -341,7 +601,7 @@
         }
       }
     },
-    "Activity log" : {
+    "Activity Log" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -367,6 +627,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ hinzufügen"
+          }
+        }
+      }
+    },
+    "Add a Connection first." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Füge zuerst eine Verbindung hinzu."
           }
         }
       }
@@ -431,12 +701,63 @@
         }
       }
     },
+    "Added %lld files to Offline Item “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Datei zum Offline-Element „%2$@“ hinzugefügt"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Dateien zum Offline-Element „%2$@“ hinzugefügt"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Added %lld file to Offline Item “%@”"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Added %lld files to Offline Item “%@”"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Additional Setup" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Weitere Einrichtung"
+          }
+        }
+      }
+    },
+    "Additional Setup – %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weitere Einrichtung – %@"
           }
         }
       }
@@ -467,6 +788,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alle Einträge"
+          }
+        }
+      }
+    },
+    "All files were changed in the cloud." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Dateien wurden in der Cloud geändert."
+          }
+        }
+      }
+    },
+    "All files were changed in the local copy." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Dateien wurden in der lokalen Kopie geändert."
+          }
+        }
+      }
+    },
+    "All other providers" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle anderen Anbieter"
           }
         }
       }
@@ -521,12 +872,63 @@
         }
       }
     },
-    "Another app asked CloudWire to %@ for:\n\n%@\n\nContinue only if you started this yourself." : {
+    "Another app asked CloudWire to create a public link for these items:" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Eine andere App möchte, dass CloudWire folgende Aktion ausführt: %1$@ für:\n\n%2$@\n\nFahre nur fort, wenn du das selbst ausgelöst hast."
+            "value" : "Eine andere App möchte für folgende Objekte einen öffentlichen Link erstellen:"
+          }
+        }
+      }
+    },
+    "Another app asked CloudWire to encrypt these items into a Vault:" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine andere App möchte folgende Objekte in einen Tresor verschlüsseln:"
+          }
+        }
+      }
+    },
+    "Another app asked CloudWire to make these items available offline:" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine andere App möchte folgende Objekte offline verfügbar machen:"
+          }
+        }
+      }
+    },
+    "Another app asked CloudWire to remove this Offline Item:" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine andere App möchte dieses Offline-Element entfernen:"
+          }
+        }
+      }
+    },
+    "Another app asked CloudWire to run “%@” for these items:" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine andere App möchte, dass CloudWire „%@“ für folgende Objekte ausführt:"
+          }
+        }
+      }
+    },
+    "Another Mount already uses %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein anderes Laufwerk verwendet %@ bereits"
           }
         }
       }
@@ -566,7 +968,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bei jedem Login fragen"
+            "value" : "Bei jeder Anmeldung fragen"
           }
         }
       }
@@ -607,6 +1009,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hintergrunddienst"
+          }
+        }
+      }
+    },
+    "Background service %@ started" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hintergrunddienst %@ gestartet"
           }
         }
       }
@@ -661,12 +1074,33 @@
         }
       }
     },
+    "Background service stopped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hintergrunddienst beendet"
+          }
+        }
+      }
+    },
     "Bandwidth" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bandbreite"
+          }
+        }
+      }
+    },
+    "Bandwidth limit\nMaximum transfer speed, e.g. 10M for 10 MiB/s, or off." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bandbreitenlimit\nHöchste Übertragungsgeschwindigkeit, z. B. 10M für 10 MiB/s, oder off."
           }
         }
       }
@@ -691,32 +1125,22 @@
         }
       }
     },
-    "Both versions were kept: %@ and %lld more." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Beide Versionen wurden behalten: %1$@ und %2$lld weitere."
-          }
-        }
-      }
-    },
-    "Both versions were kept: %@." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Beide Versionen wurden behalten: %@."
-          }
-        }
-      }
-    },
     "Browse…" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Durchsuchen…"
+          }
+        }
+      }
+    },
+    "Buffer per transfer\nMemory used to read ahead for each file being transferred." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Puffer pro Übertragung\nArbeitsspeicher, mit dem für jede übertragene Datei vorausgelesen wird."
           }
         }
       }
@@ -747,6 +1171,94 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anmeldung abbrechen"
+          }
+        }
+      }
+    },
+    "Cannot configure the Vault" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Tresor kann nicht eingerichtet werden"
+          }
+        }
+      }
+    },
+    "Cannot create %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kann nicht erstellt werden"
+          }
+        }
+      }
+    },
+    "Cannot create the Vault folder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Tresorordner kann nicht erstellt werden"
+          }
+        }
+      }
+    },
+    "Cannot open %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kann nicht geöffnet werden"
+          }
+        }
+      }
+    },
+    "Cannot read %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kann nicht gelesen werden"
+          }
+        }
+      }
+    },
+    "Cannot read %@/vault.json" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@/vault.json kann nicht gelesen werden"
+          }
+        }
+      }
+    },
+    "Cannot write %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kann nicht geschrieben werden"
+          }
+        }
+      }
+    },
+    "Cannot write vault.json" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vault.json kann nicht geschrieben werden"
           }
         }
       }
@@ -801,6 +1313,16 @@
         }
       }
     },
+    "Changes that are not synced yet are no longer uploaded." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht synchronisierte Änderungen werden nicht mehr hochgeladen."
+          }
+        }
+      }
+    },
     "Change…" : {
       "localizations" : {
         "de" : {
@@ -841,12 +1363,12 @@
         }
       }
     },
-    "Check interval for other providers" : {
+    "Check the Cloud for Changes" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prüfintervall für andere Anbieter"
+            "value" : "Cloud auf Änderungen prüfen"
           }
         }
       }
@@ -861,7 +1383,7 @@
         }
       }
     },
-    "Choose an empty folder for the drive." : {
+    "Choose an empty folder for the Mount." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -881,22 +1403,52 @@
         }
       }
     },
+    "Choose the base folder for new Offline Items. Existing Offline Items stay where they are." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle den Basisordner für neue Offline-Elemente. Vorhandene Offline-Elemente bleiben, wo sie sind."
+          }
+        }
+      }
+    },
+    "Choose the folder in which CloudWire creates the folder for the offline copy, for example on an external SSD." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle den Ordner, in dem CloudWire den Ordner für die Offline-Kopie anlegt, zum Beispiel auf einer externen SSD."
+          }
+        }
+      }
+    },
+    "Choose the folder in which CloudWire creates “%@” for the offline copy, for example on an external SSD." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle den Ordner, in dem CloudWire „%@“ für die Offline-Kopie anlegt, zum Beispiel auf einer externen SSD."
+          }
+        }
+      }
+    },
+    "Choose the folder in which new Mounts appear." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle den Ordner, in dem neue Laufwerke eingehängt werden."
+          }
+        }
+      }
+    },
     "Choose the new storage location. The local files are moved there, nothing is downloaded again." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wähle den neuen Speicherort. Die lokalen Dateien werden dorthin verschoben, nichts wird erneut geladen."
-          }
-        }
-      }
-    },
-    "Choose where the offline copy is stored, for example on an external SSD." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wähle, wo die Offline-Kopie gespeichert wird, zum Beispiel auf einer externen SSD."
           }
         }
       }
@@ -921,32 +1473,12 @@
         }
       }
     },
-    "Close Interface" : {
+    "Close Windows" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Oberfläche schließen"
-          }
-        }
-      }
-    },
-    "Cloud accounts CloudWire can use." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloud-Konten, die CloudWire verwenden kann."
-          }
-        }
-      }
-    },
-    "Cloud change polling" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abfrage von Cloud-Änderungen"
+            "value" : "Alle Fenster schließen"
           }
         }
       }
@@ -961,12 +1493,32 @@
         }
       }
     },
-    "Cloud folders as drives in Finder, streamed on demand." : {
+    "Cloud folders and files as real local copies, synced in the background." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud-Ordner und -Dateien als echte lokale Kopien, im Hintergrund synchronisiert."
+          }
+        }
+      }
+    },
+    "Cloud folders in Finder, streamed on demand." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cloud-Ordner als Laufwerke im Finder, bei Bedarf gestreamt."
+          }
+        }
+      }
+    },
+    "Cloud services and servers CloudWire uses." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud-Dienste und Server, die CloudWire nutzt."
           }
         }
       }
@@ -1021,16 +1573,6 @@
         }
       }
     },
-    "CloudWire can merge the existing files with the cloud; for files present on both sides the newer version wins." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "CloudWire kann die vorhandenen Dateien mit der Cloud zusammenführen; bei Dateien, die auf beiden Seiten existieren, gewinnt die neuere Version."
-          }
-        }
-      }
-    },
     "CloudWire can reach “%@”." : {
       "localizations" : {
         "de" : {
@@ -1061,12 +1603,12 @@
         }
       }
     },
-    "CloudWire forgets this account. Files in the cloud are not touched." : {
+    "CloudWire forgets this Connection and its credentials. Files in the cloud stay untouched." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "CloudWire vergisst dieses Konto. Dateien in der Cloud bleiben unberührt."
+            "value" : "CloudWire vergisst diese Verbindung und ihre Zugangsdaten. Dateien in der Cloud bleiben unberührt."
           }
         }
       }
@@ -1101,6 +1643,16 @@
         }
       }
     },
+    "CloudWire only knows the links it created. Right-click a file in a Mount or Offline folder and choose Share… to create one." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CloudWire kennt nur die Links, die hier erstellt wurden. Klicke im Finder mit der rechten Maustaste auf eine Datei in einem Laufwerk oder Offline-Ordner und wähle „Teilen…“."
+          }
+        }
+      }
+    },
     "CloudWire tells you about errors, conflicts and deletions that need your decision." : {
       "localizations" : {
         "de" : {
@@ -1111,12 +1663,33 @@
         }
       }
     },
+    "CloudWire tries again automatically." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CloudWire versucht es automatisch erneut."
+          }
+        }
+      }
+    },
     "CloudWire Vault Recovery Key" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "CloudWire-Tresor – Wiederherstellungsschlüssel"
+          }
+        }
+      }
+    },
+    "CloudWire's background service did not answer %@ in time." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Hintergrunddienst von CloudWire hat %@ nicht rechtzeitig beantwortet."
           }
         }
       }
@@ -1161,6 +1734,16 @@
         }
       }
     },
+    "Confirm the deletion only if it is intended." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bestätige das Löschen nur, wenn es beabsichtigt ist."
+          }
+        }
+      }
+    },
     "Conflict" : {
       "localizations" : {
         "de" : {
@@ -1181,12 +1764,12 @@
         }
       }
     },
-    "Conflicts" : {
+    "Conflicts (Conflict Copy created)" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Konflikte"
+            "value" : "Konflikte (Konfliktkopie angelegt)"
           }
         }
       }
@@ -1221,6 +1804,17 @@
         }
       }
     },
+    "Connection %@ not found" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbindung %@ nicht gefunden"
+          }
+        }
+      }
+    },
     "Connection not found" : {
       "localizations" : {
         "de" : {
@@ -1231,12 +1825,55 @@
         }
       }
     },
+    "Connection timeout\nHow long to wait while connecting to the server." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeitlimit für den Verbindungsaufbau\nWie lange beim Verbinden mit dem Server gewartet wird."
+          }
+        }
+      }
+    },
     "Connection works" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Verbindung funktioniert"
+          }
+        }
+      }
+    },
+    "Connection “%@” added (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbindung „%1$@“ hinzugefügt (%2$@)"
+          }
+        }
+      }
+    },
+    "Connection “%@” removed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbindung „%@“ entfernt"
+          }
+        }
+      }
+    },
+    "Connection “%@” updated" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbindung „%@“ geändert"
           }
         }
       }
@@ -1261,12 +1898,32 @@
         }
       }
     },
+    "Continue only if you started this yourself." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fahre nur fort, wenn du das selbst ausgelöst hast."
+          }
+        }
+      }
+    },
     "Copied" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiert"
+          }
+        }
+      }
+    },
+    "Copied links" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopierte Links"
           }
         }
       }
@@ -1311,12 +1968,24 @@
         }
       }
     },
-    "Core" : {
+    "Could not store the Vault password in the Keychain" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Core"
+            "value" : "Das Tresorpasswort konnte nicht im Schlüsselbund gespeichert werden"
+          }
+        }
+      }
+    },
+    "Could not unmount “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ konnte nicht ausgeworfen werden"
           }
         }
       }
@@ -1341,22 +2010,22 @@
         }
       }
     },
-    "create a public link" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "einen öffentlichen Link erstellen"
-          }
-        }
-      }
-    },
     "Create an app password in Nextcloud under Settings > Security > Devices & sessions." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erstelle ein App-Passwort in Nextcloud unter Einstellungen > Sicherheit > Geräte & Sitzungen."
+          }
+        }
+      }
+    },
+    "Create Another Link" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weiteren Link erstellen"
           }
         }
       }
@@ -1371,12 +2040,33 @@
         }
       }
     },
+    "Create New Share" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Freigabe erstellen"
+          }
+        }
+      }
+    },
     "Create Vault" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tresor erstellen"
+          }
+        }
+      }
+    },
+    "Created public link for “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffentlicher Link für „%@“ erstellt"
           }
         }
       }
@@ -1407,6 +2097,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Datum"
+          }
+        }
+      }
+    },
+    "Date: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Datum: %@"
           }
         }
       }
@@ -1531,12 +2231,42 @@
         }
       }
     },
+    "Delete the Connection “%@”?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbindung „%@“ löschen?"
+          }
+        }
+      }
+    },
+    "Delete the link “%@”?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Link „%@“ löschen?"
+          }
+        }
+      }
+    },
     "Delete the Mount “%@”?" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Laufwerk „%@“ löschen?"
+          }
+        }
+      }
+    },
+    "Delete the share with %@?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigabe für %@ löschen?"
           }
         }
       }
@@ -1561,12 +2291,34 @@
         }
       }
     },
-    "Delete “%@”?" : {
+    "Deleted" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„%@“ löschen?"
+            "value" : "Gelöscht"
+          }
+        }
+      }
+    },
+    "Deleted files of “%@” will be restored" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gelöschte Dateien von „%@“ werden wiederhergestellt"
+          }
+        }
+      }
+    },
+    "Deleted public link for “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffentlicher Link für „%@“ gelöscht"
           }
         }
       }
@@ -1577,6 +2329,68 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Löschen…"
+          }
+        }
+      }
+    },
+    "Deleting %lld original files failed: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Originaldatei konnte nicht gelöscht werden: %2$@"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Originaldateien konnten nicht gelöscht werden: %2$@"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Deleting %lld original file failed: %@"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Deleting %lld original files failed: %@"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Deletions in “%@” confirmed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Löschungen in „%@“ bestätigt"
+          }
+        }
+      }
+    },
+    "Details…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Details…"
           }
         }
       }
@@ -1661,6 +2475,16 @@
         }
       }
     },
+    "Edit Link “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Link „%@“ bearbeiten"
+          }
+        }
+      }
+    },
     "Edit Mount" : {
       "localizations" : {
         "de" : {
@@ -1681,6 +2505,16 @@
         }
       }
     },
+    "Edit Share with %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigabe für %@ bearbeiten"
+          }
+        }
+      }
+    },
     "Edit “%@”" : {
       "localizations" : {
         "de" : {
@@ -1697,6 +2531,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bearbeiten…"
+          }
+        }
+      }
+    },
+    "Eject" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auswerfen"
           }
         }
       }
@@ -1737,6 +2581,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Notfall-Export…"
+          }
+        }
+      }
+    },
+    "Emergency rclone configuration of “%@” exported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notfall-rclone-Konfiguration von „%@“ exportiert"
           }
         }
       }
@@ -1791,12 +2646,12 @@
         }
       }
     },
-    "Encrypt Existing…" : {
+    "Encrypt Files…" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorhandenes verschlüsseln…"
+            "value" : "Dateien verschlüsseln…"
           }
         }
       }
@@ -1811,22 +2666,23 @@
         }
       }
     },
-    "encrypt items into a Vault" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Elemente in einen Tresor verschlüsseln"
-          }
-        }
-      }
-    },
     "Encrypted cloud folders. Names and contents are encrypted on your Mac." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Verschlüsselte Cloud-Ordner. Namen und Inhalte werden auf deinem Mac verschlüsselt."
+          }
+        }
+      }
+    },
+    "Encrypted copy in “%@” verified; waiting for confirmation to delete the original" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsselte Kopie in „%@“ geprüft; das Original wird nach deiner Bestätigung gelöscht"
           }
         }
       }
@@ -1841,6 +2697,49 @@
         }
       }
     },
+    "Encrypting into “%@” failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsseln in „%@“ fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "Encrypting “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ wird verschlüsselt"
+          }
+        }
+      }
+    },
+    "Encrypting “%@” into Vault “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ wird in den Tresor „%2$@“ verschlüsselt"
+          }
+        }
+      }
+    },
+    "Encrypting “%@” into Vault “%@” canceled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsseln von „%1$@“ in den Tresor „%2$@“ abgebrochen"
+          }
+        }
+      }
+    },
     "Encryption failed. The original was kept." : {
       "localizations" : {
         "de" : {
@@ -1851,22 +2750,73 @@
         }
       }
     },
-    "Encrypts the folder “%@”. Select a single file to encrypt only that file." : {
+    "Encryption job %@ not found" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Verschlüsselt den Ordner „%@“. Wähle eine einzelne Datei, um nur diese zu verschlüsseln."
+            "value" : "Verschlüsselungsauftrag %@ nicht gefunden"
           }
         }
       }
     },
-    "Encrypts the selected file." : {
+    "Encryption of “%@”" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Verschlüsselt die ausgewählte Datei."
+            "value" : "Verschlüsselung von „%@“"
+          }
+        }
+      }
+    },
+    "Encryption of “%@” failed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsselung von „%@“ fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "Encryption of “%@” finished and verified" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsselung von „%@“ abgeschlossen und geprüft"
+          }
+        }
+      }
+    },
+    "Encryption of “%@” found differences" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsselung von „%@“: Abweichungen gefunden"
+          }
+        }
+      }
+    },
+    "Encrypts the file “%@”." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsselt die Datei „%@“."
+          }
+        }
+      }
+    },
+    "Encrypts the folder “%@”." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsselt den Ordner „%@“."
           }
         }
       }
@@ -1877,6 +2827,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fehler"
+          }
+        }
+      }
+    },
+    "Error in “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehler bei „%@“"
           }
         }
       }
@@ -1901,16 +2861,6 @@
         }
       }
     },
-    "Everyone can view. Also allow:" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alle können ansehen. Zusätzlich erlauben:"
-          }
-        }
-      }
-    },
     "Everything is up to date" : {
       "localizations" : {
         "de" : {
@@ -1931,12 +2881,12 @@
         }
       }
     },
-    "Excludes & Advanced" : {
+    "Excludes & Advanced: %@" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ausschlüsse & Erweitert"
+            "value" : "Ausschlüsse & Erweitert: %@"
           }
         }
       }
@@ -2001,12 +2951,12 @@
         }
       }
     },
-    "Export the activity log as CSV or JSON (choose the file extension)." : {
+    "Export the activity log" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Aktivitätsprotokoll als CSV oder JSON exportieren (über die Dateiendung)."
+            "value" : "Aktivitätsprotokoll exportieren"
           }
         }
       }
@@ -2017,6 +2967,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Exportieren…"
+          }
+        }
+      }
+    },
+    "Failed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehlgeschlagen"
           }
         }
       }
@@ -2051,6 +3011,16 @@
         }
       }
     },
+    "Files that differ: %lld. The original is kept." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abweichende Dateien: %lld. Das Original bleibt erhalten."
+          }
+        }
+      }
+    },
     "Filter" : {
       "localizations" : {
         "de" : {
@@ -2077,6 +3047,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Finder-Erweiterung und Mitteilungen"
+          }
+        }
+      }
+    },
+    "First start: conflict label “%@”, Studio Mode apps detected: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erster Start: Konfliktkennung „%1$@“, erkannte Studiomodus-Apps: %2$lld"
           }
         }
       }
@@ -2121,22 +3102,22 @@
         }
       }
     },
-    "Folders and files kept as real local files, synced in the background." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ordner und Dateien als echte lokale Dateien, im Hintergrund synchronisiert."
-          }
-        }
-      }
-    },
     "For 1 Hour" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "1 Stunde"
+            "value" : "Für 1 Stunde"
+          }
+        }
+      }
+    },
+    "Format:" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Format:"
           }
         }
       }
@@ -2181,6 +3162,17 @@
         }
       }
     },
+    "FUSE requires FUSE-T or macFUSE to be installed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FUSE setzt eine Installation von FUSE-T oder macFUSE voraus"
+          }
+        }
+      }
+    },
     "FUSE-T installed" : {
       "localizations" : {
         "de" : {
@@ -2221,12 +3213,12 @@
         }
       }
     },
-    "Get FUSE-T" : {
+    "Get FUSE-T…" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FUSE-T installieren"
+            "value" : "FUSE-T laden…"
           }
         }
       }
@@ -2271,12 +3263,43 @@
         }
       }
     },
+    "High CPU load (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hohe CPU-Last (%@)"
+          }
+        }
+      }
+    },
     "I have stored the Recovery Key in a safe place." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ich habe den Wiederherstellungsschlüssel sicher aufbewahrt."
+          }
+        }
+      }
+    },
+    "Idle timeout\nA transfer without any data for this long is aborted." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeitlimit bei Stillstand\nEine Übertragung, bei der so lange keine Daten fließen, wird abgebrochen."
+          }
+        }
+      }
+    },
+    "Ignore Pause Rules (e.g. Studio Mode)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausenregeln ignorieren (z. B. Studiomodus)"
           }
         }
       }
@@ -2307,6 +3330,27 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Interner Link"
+          }
+        }
+      }
+    },
+    "Internal links are only available for Nextcloud and ownCloud" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interne Links gibt es nur bei Nextcloud und ownCloud"
+          }
+        }
+      }
+    },
+    "Intervals" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Intervalle"
           }
         }
       }
@@ -2361,6 +3405,26 @@
         }
       }
     },
+    "Later" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Später"
+          }
+        }
+      }
+    },
+    "Leave empty to keep the current one" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leer lassen, um das aktuelle zu behalten"
+          }
+        }
+      }
+    },
     "Leave password fields empty to keep the stored value." : {
       "localizations" : {
         "de" : {
@@ -2387,16 +3451,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "libfuse-Header (FUSE-T) – LGPL-2.1."
-          }
-        }
-      }
-    },
-    "Limit bandwidth" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bandbreite begrenzen"
           }
         }
       }
@@ -2431,12 +3485,43 @@
         }
       }
     },
-    "Location" : {
+    "Links created in CloudWire" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ort"
+            "value" : "In CloudWire erstellte Links"
+          }
+        }
+      }
+    },
+    "Links of this provider cannot be edited; delete the link and create it again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Links dieses Anbieters lassen sich nicht bearbeiten; lösche den Link und erstelle ihn neu"
+          }
+        }
+      }
+    },
+    "Links of this provider don't expire." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Links dieses Anbieters laufen nicht ab."
+          }
+        }
+      }
+    },
+    "Location: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ort: %@"
           }
         }
       }
@@ -2447,6 +3532,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sperren"
+          }
+        }
+      }
+    },
+    "Lock “%@”?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ sperren?"
           }
         }
       }
@@ -2501,6 +3596,28 @@
         }
       }
     },
+    "Low Data Mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Datensparmodus"
+          }
+        }
+      }
+    },
+    "Low Power Mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stromsparmodus"
+          }
+        }
+      }
+    },
     "macFUSE installed" : {
       "localizations" : {
         "de" : {
@@ -2532,26 +3649,6 @@
       }
     },
     "Make Available Offline" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline verfügbar machen"
-          }
-        }
-      }
-    },
-    "make items available offline" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Elemente offline verfügbar machen"
-          }
-        }
-      }
-    },
-    "Make offline" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -2601,12 +3698,23 @@
         }
       }
     },
-    "Mass-Delete Guard" : {
+    "Mass-Delete Guard stopped “%@”" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Massenlöschschutz"
+            "value" : "Der Massenlöschschutz hat „%@“ gestoppt"
+          }
+        }
+      }
+    },
+    "Maximum file size\nLarger files are skipped, e.g. 2G, or off." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maximale Dateigröße\nGrößere Dateien werden übersprungen, z. B. 2G, oder off."
           }
         }
       }
@@ -2631,22 +3739,22 @@
         }
       }
     },
+    "Merging syncs everything already in this folder with the cloud: files only here are uploaded, and for files present on both sides the newer version wins." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Zusammenführen wird alles, was schon in diesem Ordner liegt, mit der Cloud synchronisiert: Dateien, die nur hier liegen, werden hochgeladen, und bei Dateien auf beiden Seiten gewinnt die neuere Version."
+          }
+        }
+      }
+    },
     "Message" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Meldung"
-          }
-        }
-      }
-    },
-    "Metered network" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Getaktetes Netzwerk"
           }
         }
       }
@@ -2671,12 +3779,32 @@
         }
       }
     },
-    "More than half of the files would be deleted. Confirm the deletion only if you removed them on purpose." : {
+    "Minimum file size\nSmaller files are skipped, e.g. 1k, or off." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mehr als die Hälfte der Dateien würde gelöscht. Bestätige das Löschen nur, wenn du sie absichtlich entfernt hast."
+            "value" : "Minimale Dateigröße\nKleinere Dateien werden übersprungen, z. B. 1k, oder off."
+          }
+        }
+      }
+    },
+    "More Actions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weitere Aktionen"
+          }
+        }
+      }
+    },
+    "More than half of the files would be deleted." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mehr als die Hälfte der Dateien würde gelöscht."
           }
         }
       }
@@ -2701,6 +3829,17 @@
         }
       }
     },
+    "Mount %@ not found" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk %@ nicht gefunden"
+          }
+        }
+      }
+    },
     "Mount as Drive" : {
       "localizations" : {
         "de" : {
@@ -2717,6 +3856,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatisch einbinden"
+          }
+        }
+      }
+    },
+    "Mount in Finder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Finder einbinden"
           }
         }
       }
@@ -2741,12 +3890,111 @@
         }
       }
     },
+    "Mount “%@” created at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%1$@“ in %2$@ erstellt"
+          }
+        }
+      }
+    },
+    "Mount “%@” failed repeatedly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ ist wiederholt ausgefallen"
+          }
+        }
+      }
+    },
+    "Mount “%@” is not responding; restarting it" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ reagiert nicht und wird neu gestartet"
+          }
+        }
+      }
+    },
+    "Mount “%@” removed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ entfernt"
+          }
+        }
+      }
+    },
+    "Mount “%@” stopped unexpectedly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ wurde unerwartet beendet"
+          }
+        }
+      }
+    },
+    "Mount “%@” unmounted" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ ausgeworfen"
+          }
+        }
+      }
+    },
+    "Mount “%@” updated" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ geändert"
+          }
+        }
+      }
+    },
+    "Mount “%@” was ejected in Finder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerk „%@“ wurde im Finder ausgeworfen"
+          }
+        }
+      }
+    },
     "Mounted" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Eingebunden"
+          }
+        }
+      }
+    },
+    "Mounted “%@” at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ in %2$@ eingebunden"
           }
         }
       }
@@ -2771,6 +4019,16 @@
         }
       }
     },
+    "Mounts are ejected and syncing stops until you open CloudWire again or next log in." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laufwerke werden ausgeworfen und die Synchronisation stoppt, bis du CloudWire wieder öffnest oder dich das nächste Mal anmeldest."
+          }
+        }
+      }
+    },
     "Mounts are ejected and syncing stops until you open CloudWire again." : {
       "localizations" : {
         "de" : {
@@ -2781,12 +4039,12 @@
         }
       }
     },
-    "Mounts show cloud folders as drives in Finder." : {
+    "Mounts show your cloud folders in Finder, streamed on demand." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Laufwerke zeigen Cloud-Ordner im Finder."
+            "value" : "Laufwerke zeigen deine Cloud-Ordner im Finder und laden Dateien bei Bedarf."
           }
         }
       }
@@ -2796,7 +4054,61 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Lokale Kopie in den Papierkorb"
+            "value" : "Lokale Kopie in den Papierkorb legen"
+          }
+        }
+      }
+    },
+    "Moved “%@” to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ nach %2$@ verschoben"
+          }
+        }
+      }
+    },
+    "Moved “%@”, but some files could not be removed from %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ verschoben, aber einige Dateien konnten nicht aus %2$@ entfernt werden"
+          }
+        }
+      }
+    },
+    "Moving the files failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Dateien konnten nicht verschoben werden"
+          }
+        }
+      }
+    },
+    "Moving the local copy to the Trash failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die lokale Kopie konnte nicht in den Papierkorb gelegt werden"
+          }
+        }
+      }
+    },
+    "Moving…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird verschoben…"
           }
         }
       }
@@ -2841,6 +4153,28 @@
         }
       }
     },
+    "Network changed (offline)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Netzwerk geändert (offline)"
+          }
+        }
+      }
+    },
+    "Network changed (online)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Netzwerk geändert (online)"
+          }
+        }
+      }
+    },
     "Never" : {
       "localizations" : {
         "de" : {
@@ -2861,12 +4195,22 @@
         }
       }
     },
-    "New password (empty keeps the current one)" : {
+    "New Password" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Neues Passwort (leer lässt das aktuelle)"
+            "value" : "Neues Passwort"
+          }
+        }
+      }
+    },
+    "New password" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neues Passwort"
           }
         }
       }
@@ -2891,12 +4235,24 @@
         }
       }
     },
-    "Nextcloud check interval" : {
+    "Nextcloud connection “%@” added (%@ as %@)" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prüfintervall für Nextcloud"
+            "value" : "Nextcloud-Verbindung „%1$@“ hinzugefügt (%2$@ als %3$@)"
+          }
+        }
+      }
+    },
+    "Nextcloud connection “%@” signed in again as %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nextcloud-Verbindung „%1$@“ erneut angemeldet als %2$@"
           }
         }
       }
@@ -2917,6 +4273,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "NFS nutzt den in macOS integrierten Dateisystem-Client und braucht keine Installation. FUSE ist optional."
+          }
+        }
+      }
+    },
+    "No connection setup in progress for %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Für %@ läuft keine Einrichtung einer Verbindung"
           }
         }
       }
@@ -2961,6 +4328,36 @@
         }
       }
     },
+    "No Links Created in CloudWire" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine in CloudWire erstellten Links"
+          }
+        }
+      }
+    },
+    "No Matching Entries" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine passenden Einträge"
+          }
+        }
+      }
+    },
+    "No matching users or groups." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine passenden Personen oder Gruppen."
+          }
+        }
+      }
+    },
     "No Mounts" : {
       "localizations" : {
         "de" : {
@@ -2991,12 +4388,43 @@
         }
       }
     },
+    "No sync runs yet." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine Synchronisationsläufe."
+          }
+        }
+      }
+    },
     "No Vaults" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Keine Tresore"
+          }
+        }
+      }
+    },
+    "None of your connections supports sharing." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine deiner Verbindungen unterstützt Freigaben."
+          }
+        }
+      }
+    },
+    "Not connected to CloudWire's background service." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Verbindung zum Hintergrunddienst von CloudWire."
           }
         }
       }
@@ -3011,12 +4439,23 @@
         }
       }
     },
-    "Not enough free space: at least 1.1 × the cloud size is required." : {
+    "Not enough free space: %@ needed, %@ available" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nicht genug freier Speicher: mindestens das 1,1-Fache der Cloud-Größe ist nötig."
+            "value" : "Nicht genug freier Speicher: %1$@ nötig, %2$@ verfügbar"
+          }
+        }
+      }
+    },
+    "Not enough free space: about %@ needed, %@ free. Use “Change…” to choose a storage location on another volume." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht genug freier Speicher: etwa %1$@ nötig, %2$@ frei. Wähle über „Ändern…“ einen Speicherort auf einem anderen Volume."
           }
         }
       }
@@ -3081,6 +4520,26 @@
         }
       }
     },
+    "Notifications are turned off in System Settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mitteilungen sind in den Systemeinstellungen ausgeschaltet."
+          }
+        }
+      }
+    },
+    "Notify Me About" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mitteilungen für"
+          }
+        }
+      }
+    },
     "Off" : {
       "localizations" : {
         "de" : {
@@ -3111,12 +4570,56 @@
         }
       }
     },
+    "Offline Item %@ not found" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline-Element %@ nicht gefunden"
+          }
+        }
+      }
+    },
     "Offline Item not found" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Offline-Element nicht gefunden"
+          }
+        }
+      }
+    },
+    "Offline Item “%@” added at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline-Element „%1$@“ in %2$@ hinzugefügt"
+          }
+        }
+      }
+    },
+    "Offline Item “%@” removed; local copy kept" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline-Element „%@“ entfernt; lokale Kopie behalten"
+          }
+        }
+      }
+    },
+    "Offline Item “%@” removed; local copy moved to the Trash" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline-Element „%@“ entfernt; lokale Kopie in den Papierkorb gelegt"
           }
         }
       }
@@ -3141,12 +4644,12 @@
         }
       }
     },
-    "Offline Items keep real local copies, synced in the background." : {
+    "Offline Items keep real local copies in sync in the background." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Offline-Elemente halten echte lokale Kopien, im Hintergrund synchronisiert."
+            "value" : "Offline-Elemente halten echte lokale Kopien im Hintergrund synchron."
           }
         }
       }
@@ -3201,12 +4704,12 @@
         }
       }
     },
-    "Open a folder ending in .cwvault." : {
+    "Open Browser Again" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Öffne einen Ordner mit der Endung .cwvault."
+            "value" : "Browser erneut öffnen"
           }
         }
       }
@@ -3231,12 +4734,12 @@
         }
       }
     },
-    "Open Existing…" : {
+    "Open Existing Vault…" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vorhandenen öffnen…"
+            "value" : "Vorhandenen Tresor öffnen…"
           }
         }
       }
@@ -3271,12 +4774,64 @@
         }
       }
     },
+    "Open Vault…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor öffnen…"
+          }
+        }
+      }
+    },
+    "Opening in the browser is only available for Nextcloud and ownCloud" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffnen im Browser ist nur mit Nextcloud und ownCloud möglich"
+          }
+        }
+      }
+    },
+    "Optional" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optional"
+          }
+        }
+      }
+    },
     "Optional, e.g. Nextcloud" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Optional, z. B. Nextcloud"
+          }
+        }
+      }
+    },
+    "Original “%@” deleted after encryption" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original „%@“ nach dem Verschlüsseln gelöscht"
+          }
+        }
+      }
+    },
+    "Other share" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sonstige Freigabe"
           }
         }
       }
@@ -3291,6 +4846,26 @@
         }
       }
     },
+    "Parallel checks\nHow many files are compared at the same time." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parallele Prüfungen\nWie viele Dateien gleichzeitig verglichen werden."
+          }
+        }
+      }
+    },
+    "Parallel transfers\nHow many files are copied at the same time." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parallele Übertragungen\nWie viele Dateien gleichzeitig kopiert werden."
+          }
+        }
+      }
+    },
     "Password" : {
       "localizations" : {
         "de" : {
@@ -3301,12 +4876,13 @@
         }
       }
     },
-    "Password (optional)" : {
+    "Password of Vault “%@” changed" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Passwort (optional)"
+            "value" : "Passwort von Tresor „%@“ geändert"
           }
         }
       }
@@ -3321,12 +4897,32 @@
         }
       }
     },
+    "Password Protection" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwortschutz"
+          }
+        }
+      }
+    },
     "Pause" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pausieren"
+          }
+        }
+      }
+    },
+    "Pause on a personal hotspot or in Low Data Mode" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei persönlichem Hotspot oder im Datensparmodus pausieren"
           }
         }
       }
@@ -3341,16 +4937,6 @@
         }
       }
     },
-    "Pause on metered networks (personal hotspot)" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "In getakteten Netzwerken pausieren (persönlicher Hotspot)"
-          }
-        }
-      }
-    },
     "Pause Rules" : {
       "localizations" : {
         "de" : {
@@ -3361,12 +4947,23 @@
         }
       }
     },
-    "Pause syncing until you resume. The arrow offers 1 hour or until tomorrow 08:00." : {
+    "Pause Rules no longer apply; syncing resumes" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Synchronisation pausieren, bis du fortsetzt. Über den Pfeil: 1 Stunde oder bis morgen 08:00."
+            "value" : "Keine Pausenregel greift mehr; die Synchronisation läuft weiter"
+          }
+        }
+      }
+    },
+    "Pause syncing until you resume. The arrow offers 1 hour or until tomorrow %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation pausieren, bis du fortsetzt. Über den Pfeil: 1 Stunde oder bis morgen %@."
           }
         }
       }
@@ -3461,6 +5058,27 @@
         }
       }
     },
+    "Personal hotspot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persönlicher Hotspot"
+          }
+        }
+      }
+    },
+    "Personal hotspot or Low Data Mode" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persönlicher Hotspot oder Datensparmodus"
+          }
+        }
+      }
+    },
     "Please check your input" : {
       "localizations" : {
         "de" : {
@@ -3497,6 +5115,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mit Passwort schützen"
+          }
+        }
+      }
+    },
+    "Providers with change notifications (e.g. Google Drive, OneDrive)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anbieter mit Änderungsmeldungen (z. B. Google Drive, OneDrive)"
           }
         }
       }
@@ -3571,6 +5199,17 @@
         }
       }
     },
+    "rclone reported an error" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rclone meldet einen Fehler"
+          }
+        }
+      }
+    },
     "rclone – MIT license, © Nick Craig-Wood and contributors." : {
       "localizations" : {
         "de" : {
@@ -3611,12 +5250,33 @@
         }
       }
     },
+    "Recipients can always view. Also allow:" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empfänger können immer ansehen. Zusätzlich erlauben:"
+          }
+        }
+      }
+    },
     "Recommended: log in with your browser, sharing included" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Empfohlen: Anmeldung im Browser, inklusive Freigaben"
+          }
+        }
+      }
+    },
+    "Reconnected “%@” at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ in %2$@ wieder verbunden"
           }
         }
       }
@@ -3631,12 +5291,12 @@
         }
       }
     },
-    "Recovery Key of the new Vault" : {
+    "Recovery Key for “%@”" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wiederherstellungsschlüssel des neuen Tresors"
+            "value" : "Wiederherstellungsschlüssel für „%@“"
           }
         }
       }
@@ -3661,16 +5321,6 @@
         }
       }
     },
-    "remove an Offline Item" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ein Offline-Element entfernen"
-          }
-        }
-      }
-    },
     "Remove Offline" : {
       "localizations" : {
         "de" : {
@@ -3687,6 +5337,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Offline entfernen…"
+          }
+        }
+      }
+    },
+    "Remove the Offline Item %@ first; its local copy would be uploaded again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entferne zuerst das Offline-Element %@; seine lokale Kopie würde sonst erneut hochgeladen"
+          }
+        }
+      }
+    },
+    "Remove the Vault instead" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entferne stattdessen den Tresor"
           }
         }
       }
@@ -3721,12 +5393,43 @@
         }
       }
     },
+    "Removed from CloudWire; still active at the provider – please remove it on the web." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus CloudWire entfernt; beim Anbieter weiterhin aktiv – bitte im Web entfernen."
+          }
+        }
+      }
+    },
+    "Removed the public link for “%@” from CloudWire; it stays active at the provider" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffentlicher Link für „%@“ aus CloudWire entfernt; beim Anbieter bleibt er aktiv"
+          }
+        }
+      }
+    },
     "Remove…" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Entfernen…"
+          }
+        }
+      }
+    },
+    "Repeat new password" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neues Passwort wiederholen"
           }
         }
       }
@@ -3741,6 +5444,26 @@
         }
       }
     },
+    "Requests per second\nLimits requests to the cloud per second; 0 means no limit." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anfragen pro Sekunde\nBegrenzt die Anfragen an die Cloud pro Sekunde; 0 heißt ohne Limit."
+          }
+        }
+      }
+    },
+    "Reset Filters" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter zurücksetzen"
+          }
+        }
+      }
+    },
     "Reset Password with Recovery Key" : {
       "localizations" : {
         "de" : {
@@ -3751,12 +5474,12 @@
         }
       }
     },
-    "Reset with Recovery Key…" : {
+    "Reset Password with Recovery Key…" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mit Wiederherstellungsschlüssel zurücksetzen…"
+            "value" : "Passwort mit Wiederherstellungsschlüssel zurücksetzen…"
           }
         }
       }
@@ -3801,6 +5524,26 @@
         }
       }
     },
+    "Retries of a failed sync\nHow often a whole sync is tried again after an error." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wiederholungen einer fehlgeschlagenen Synchronisation\nWie oft eine ganze Synchronisation nach einem Fehler erneut versucht wird."
+          }
+        }
+      }
+    },
+    "Retries of single requests\nHow often a single failed request to the cloud is repeated." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wiederholungen einzelner Anfragen\nWie oft eine einzelne fehlgeschlagene Anfrage an die Cloud wiederholt wird."
+          }
+        }
+      }
+    },
     "Right-click a file in a Mount or Offline folder and choose Share… to create one." : {
       "localizations" : {
         "de" : {
@@ -3811,12 +5554,12 @@
         }
       }
     },
-    "Run without pauses" : {
+    "Running" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ohne Pausen ausführen"
+            "value" : "Läuft"
           }
         }
       }
@@ -3891,6 +5634,26 @@
         }
       }
     },
+    "Searching…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suche…"
+          }
+        }
+      }
+    },
+    "Select a folder or files." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle einen Ordner oder Dateien."
+          }
+        }
+      }
+    },
     "Select a sync run to see its files." : {
       "localizations" : {
         "de" : {
@@ -3901,12 +5664,22 @@
         }
       }
     },
-    "Select an entry to see its details." : {
+    "Select a Vault (shield symbol)." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wähle einen Eintrag, um Details zu sehen."
+            "value" : "Wähle einen Tresor (Schild-Symbol)."
+          }
+        }
+      }
+    },
+    "Select one folder or one file." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle einen Ordner oder eine Datei."
           }
         }
       }
@@ -3921,12 +5694,112 @@
         }
       }
     },
-    "Selected files" : {
+    "Select This Folder" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ausgewählte Dateien"
+            "value" : "Diesen Ordner wählen"
+          }
+        }
+      }
+    },
+    "Select “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ auswählen"
+          }
+        }
+      }
+    },
+    "Selected: %lld files in “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgewählt: %#@files@ in „%2$@“"
+          },
+          "substitutions" : {
+            "files" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Datei"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Dateien"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selected: %#@files@ in “%2$@”"
+          },
+          "substitutions" : {
+            "files" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg file"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg files"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Selected: folder “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgewählt: Ordner „%@“"
+          }
+        }
+      }
+    },
+    "Selected: Vault “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgewählt: Tresor „%@“"
+          }
+        }
+      }
+    },
+    "Selected: “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgewählt: „%@“"
           }
         }
       }
@@ -3951,12 +5824,22 @@
         }
       }
     },
-    "Service log" : {
+    "Service Log" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dienstprotokoll"
+          }
+        }
+      }
+    },
+    "Set after the selection (in %@)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird nach der Auswahl festgelegt (in %@)"
           }
         }
       }
@@ -3967,6 +5850,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Neues Passwort setzen"
+          }
+        }
+      }
+    },
+    "Settings of “%@” changed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einstellungen von „%@“ geändert"
           }
         }
       }
@@ -3991,12 +5885,35 @@
         }
       }
     },
-    "Share links from Finder and encrypt folders in Vaults." : {
+    "Share %@ deleted" : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Teile Links direkt aus dem Finder und verschlüssele Ordner in Tresoren."
+            "value" : "Freigabe %@ gelöscht"
+          }
+        }
+      }
+    },
+    "Share %@ not found" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigabe %@ nicht gefunden"
+          }
+        }
+      }
+    },
+    "Share %@ updated" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigabe %@ geändert"
           }
         }
       }
@@ -4021,6 +5938,49 @@
         }
       }
     },
+    "Share “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ teilen"
+          }
+        }
+      }
+    },
+    "Shared “%@” by email" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ per E-Mail freigegeben"
+          }
+        }
+      }
+    },
+    "Shared “%@” with a group" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ für eine Gruppe freigegeben"
+          }
+        }
+      }
+    },
+    "Shared “%@” with a user" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ für einen Benutzer freigegeben"
+          }
+        }
+      }
+    },
     "Shares" : {
       "localizations" : {
         "de" : {
@@ -4037,6 +5997,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Freigaben dieses Elements"
+          }
+        }
+      }
+    },
+    "Shares send links straight from Finder, Vaults encrypt folders in the cloud." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigaben verschicken Links direkt aus dem Finder, Tresore verschlüsseln Ordner in der Cloud."
           }
         }
       }
@@ -4071,6 +6041,17 @@
         }
       }
     },
+    "Sharing is not available inside a Vault because its files are encrypted" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teilen ist in einem Tresor nicht verfügbar, weil seine Dateien verschlüsselt sind"
+          }
+        }
+      }
+    },
     "Sharing is not available inside a Vault. Its files are stored encrypted in the cloud, so a link would only reveal unreadable data." : {
       "localizations" : {
         "de" : {
@@ -4087,6 +6068,27 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Teilen wird hier nicht unterstützt"
+          }
+        }
+      }
+    },
+    "Sharing Not Available" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teilen nicht verfügbar"
+          }
+        }
+      }
+    },
+    "Sharing with people is only available for Nextcloud and ownCloud" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teilen mit Personen ist nur mit Nextcloud und ownCloud möglich"
           }
         }
       }
@@ -4141,12 +6143,64 @@
         }
       }
     },
+    "Show Sync History…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisationsverlauf anzeigen…"
+          }
+        }
+      }
+    },
+    "Sign In Again in Browser" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erneut im Browser anmelden"
+          }
+        }
+      }
+    },
     "Sign-in" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anmeldung"
+          }
+        }
+      }
+    },
+    "Sign-in failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anmeldung fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "Signed in again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erneut angemeldet."
+          }
+        }
+      }
+    },
+    "Signed in as %@, but “%@” belongs to another account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Angemeldet als %1$@, aber „%2$@“ gehört zu einem anderen Konto"
           }
         }
       }
@@ -4201,16 +6255,6 @@
         }
       }
     },
-    "Starting CloudWire…" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "CloudWire wird gestartet…"
-          }
-        }
-      }
-    },
     "Starting the background service…" : {
       "localizations" : {
         "de" : {
@@ -4221,22 +6265,72 @@
         }
       }
     },
-    "Starting…" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wird gestartet…"
-          }
-        }
-      }
-    },
     "Still used by: %@. Remove these first." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wird noch verwendet von: %@. Entferne diese zuerst."
+          }
+        }
+      }
+    },
+    "Stop" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppen"
+          }
+        }
+      }
+    },
+    "Stop Encryption" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verschlüsselung stoppen"
+          }
+        }
+      }
+    },
+    "Stopped" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gestoppt"
+          }
+        }
+      }
+    },
+    "Stopped by the Mass-Delete Guard" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vom Massenlöschschutz gestoppt"
+          }
+        }
+      }
+    },
+    "Stopped syncs (Mass-Delete Guard)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gestoppte Synchronisation (Massenlöschschutz)"
+          }
+        }
+      }
+    },
+    "Stopped. The original was kept." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gestoppt. Das Original wurde behalten."
           }
         }
       }
@@ -4261,6 +6355,16 @@
         }
       }
     },
+    "Streams per large file\nHow many parts of one large file are transferred at the same time." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Datenströme pro großer Datei\nWie viele Teile einer großen Datei gleichzeitig übertragen werden."
+          }
+        }
+      }
+    },
     "Studio Mode" : {
       "localizations" : {
         "de" : {
@@ -4271,12 +6375,43 @@
         }
       }
     },
+    "Studio Mode (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Studiomodus (%@)"
+          }
+        }
+      }
+    },
     "Studio Mode: pause while these apps run" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Studiomodus: pausieren, solange diese Apps laufen"
+          }
+        }
+      }
+    },
+    "Successful" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erfolgreich"
+          }
+        }
+      }
+    },
+    "Suggestions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorschläge"
           }
         }
       }
@@ -4351,6 +6486,17 @@
         }
       }
     },
+    "Sync of “%@” failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation von „%@“ fehlgeschlagen"
+          }
+        }
+      }
+    },
     "Sync stopped: “%@”" : {
       "localizations" : {
         "de" : {
@@ -4371,6 +6517,28 @@
         }
       }
     },
+    "Synced “%@”: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ synchronisiert: %2$@"
+          }
+        }
+      }
+    },
+    "Synced “%@”: no changes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ synchronisiert: keine Änderungen"
+          }
+        }
+      }
+    },
     "Syncing" : {
       "localizations" : {
         "de" : {
@@ -4381,12 +6549,67 @@
         }
       }
     },
+    "Syncing failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation fehlgeschlagen"
+          }
+        }
+      }
+    },
     "Syncing is active" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Synchronisation ist aktiv"
+          }
+        }
+      }
+    },
+    "Syncing paused" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation pausiert"
+          }
+        }
+      }
+    },
+    "Syncing paused until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation pausiert bis %@"
+          }
+        }
+      }
+    },
+    "Syncing paused until resumed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation pausiert, bis sie fortgesetzt wird"
+          }
+        }
+      }
+    },
+    "Syncing resumed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation fortgesetzt"
           }
         }
       }
@@ -4441,6 +6664,27 @@
         }
       }
     },
+    "The app password cannot be read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das App-Passwort kann nicht gelesen werden"
+          }
+        }
+      }
+    },
+    "The background service could not be started." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Hintergrunddienst konnte nicht gestartet werden."
+          }
+        }
+      }
+    },
     "The background service is running." : {
       "localizations" : {
         "de" : {
@@ -4451,12 +6695,54 @@
         }
       }
     },
-    "The chosen folder is not empty" : {
+    "The cloud folder was not found. Restore it in the cloud or remove the Offline Item." : {
+      "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Der gewählte Ordner ist nicht leer"
+            "value" : "Der Cloud-Ordner wurde nicht gefunden. Stelle ihn in der Cloud wieder her oder entferne das Offline-Element."
+          }
+        }
+      }
+    },
+    "The cloud root cannot be encrypted as a whole" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die oberste Cloud-Ebene kann nicht als Ganzes verschlüsselt werden"
+          }
+        }
+      }
+    },
+    "The cloud version was kept as a Conflict Copy next to your file: %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Cloud-Version liegt als Konfliktkopie daneben: %@."
+          }
+        }
+      }
+    },
+    "The cloud versions were kept as Conflict Copies next to your files: %@ and %lld more." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Cloud-Versionen liegen als Konfliktkopien daneben: %1$@ und %2$lld weitere."
+          }
+        }
+      }
+    },
+    "The cloud versions were kept as Conflict Copies next to your files: %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Cloud-Versionen liegen als Konfliktkopien daneben: %@."
           }
         }
       }
@@ -4481,12 +6767,34 @@
         }
       }
     },
+    "The connection setup was cancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Einrichtung der Verbindung wurde abgebrochen"
+          }
+        }
+      }
+    },
     "The connection test failed" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Der Verbindungstest ist fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "The connection to CloudWire's background service was lost." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Verbindung zum Hintergrunddienst von CloudWire wurde unterbrochen."
           }
         }
       }
@@ -4501,22 +6809,22 @@
         }
       }
     },
-    "The drive is ejected and removed from CloudWire. Files in the cloud are not touched." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Das Laufwerk wird ausgeworfen und aus CloudWire entfernt. Dateien in der Cloud bleiben unberührt."
-          }
-        }
-      }
-    },
     "The encrypted copy is complete and verified." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Die verschlüsselte Kopie ist vollständig und geprüft."
+          }
+        }
+      }
+    },
+    "The encrypted copy stays in the Vault as it is. Encrypt again to copy the differing files once more; the original is only deleted after a successful verification." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die verschlüsselte Kopie bleibt unverändert im Tresor. Verschlüssele erneut, um die abweichenden Dateien noch einmal zu kopieren; das Original wird erst nach einer erfolgreichen Prüfung gelöscht."
           }
         }
       }
@@ -4531,6 +6839,17 @@
         }
       }
     },
+    "The expiry date must be in the future" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Ablaufdatum muss in der Zukunft liegen"
+          }
+        }
+      }
+    },
     "The Finder extension adds CloudWire to the context menu (share, copy links, make available offline) and shows sync badges." : {
       "localizations" : {
         "de" : {
@@ -4541,12 +6860,88 @@
         }
       }
     },
+    "The folder %@ is not empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Ordner %@ ist nicht leer"
+          }
+        }
+      }
+    },
     "The login did not complete." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Die Anmeldung wurde nicht abgeschlossen."
+          }
+        }
+      }
+    },
+    "The login timed out" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Anmeldung ist abgelaufen"
+          }
+        }
+      }
+    },
+    "The login was cancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Anmeldung wurde abgebrochen"
+          }
+        }
+      }
+    },
+    "The Mac is going to sleep" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Mac geht in den Ruhezustand"
+          }
+        }
+      }
+    },
+    "The Mac woke from sleep" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Mac ist aus dem Ruhezustand erwacht"
+          }
+        }
+      }
+    },
+    "The Mount is ejected and removed from CloudWire. Files in the cloud are not touched." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Laufwerk wird ausgeworfen und aus CloudWire entfernt. Dateien in der Cloud bleiben unberührt."
+          }
+        }
+      }
+    },
+    "The Mount is not active" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Laufwerk ist nicht aktiv"
           }
         }
       }
@@ -4571,12 +6966,107 @@
         }
       }
     },
+    "The mount process exited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Laufwerksprozess wurde beendet"
+          }
+        }
+      }
+    },
+    "The name “%@” cannot be used as a folder name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Name „%@“ kann nicht als Ordnername verwendet werden"
+          }
+        }
+      }
+    },
+    "The name “%@” is reserved for the Mount folder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Name „%@“ ist für den Laufwerksordner reserviert"
+          }
+        }
+      }
+    },
+    "The original could not be deleted completely" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Original konnte nicht vollständig gelöscht werden"
+          }
+        }
+      }
+    },
     "The original is only deleted after the encrypted copy has been verified and you confirm." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Das Original wird erst gelöscht, wenn die verschlüsselte Kopie geprüft ist und du bestätigst."
+          }
+        }
+      }
+    },
+    "The password is not correct" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Passwort ist nicht korrekt"
+          }
+        }
+      }
+    },
+    "The password needs at least %lld characters" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Das Passwort braucht mindestens %lld Zeichen"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Das Passwort braucht mindestens %lld Zeichen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The password needs at least %lld character"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The password needs at least %lld characters"
+                }
+              }
+            }
           }
         }
       }
@@ -4591,12 +7081,54 @@
         }
       }
     },
+    "The previous mount is still attached" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die vorherige Einbindung besteht noch"
+          }
+        }
+      }
+    },
+    "The provider setup reported an error." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Einrichtung des Anbieters meldet einen Fehler."
+          }
+        }
+      }
+    },
     "The provider setup stopped unexpectedly." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Die Einrichtung des Anbieters wurde unerwartet beendet."
+          }
+        }
+      }
+    },
+    "The rclone options could not be loaded and stay unchanged: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die rclone-Optionen konnten nicht geladen werden und bleiben unverändert: %@"
+          }
+        }
+      }
+    },
+    "The Recovery Key is not correct" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Wiederherstellungsschlüssel ist nicht korrekt"
           }
         }
       }
@@ -4671,6 +7203,61 @@
         }
       }
     },
+    "The sign-in timed out" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Anmeldung hat zu lange gedauert"
+          }
+        }
+      }
+    },
+    "The source overlaps the Vault “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Quelle überschneidet sich mit dem Tresor „%@“"
+          }
+        }
+      }
+    },
+    "The storage location %@ is not allowed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Speicherort %@ ist nicht erlaubt"
+          }
+        }
+      }
+    },
+    "The storage location %@ is too broad" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Speicherort %@ umfasst zu viel"
+          }
+        }
+      }
+    },
+    "The storage location %@ overlaps the Mount at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Speicherort %1$@ überschneidet sich mit dem Laufwerk in %2$@"
+          }
+        }
+      }
+    },
     "The storage location is missing" : {
       "localizations" : {
         "de" : {
@@ -4691,12 +7278,115 @@
         }
       }
     },
+    "The storage location overlaps the Offline Item “%@” (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Speicherort überschneidet sich mit dem Offline-Element „%1$@“ (%2$@)"
+          }
+        }
+      }
+    },
+    "The Vault could not be read or written" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Tresor konnte nicht gelesen oder geschrieben werden"
+          }
+        }
+      }
+    },
+    "The Vault is created in: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Tresor wird angelegt in: %@"
+          }
+        }
+      }
+    },
     "The Vault is locked" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Der Tresor ist gesperrt"
+          }
+        }
+      }
+    },
+    "The Vault is still in use" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Tresor wird noch verwendet"
+          }
+        }
+      }
+    },
+    "The Vault password is required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Tresorpasswort wird benötigt"
+          }
+        }
+      }
+    },
+    "The Vault “%@” is still used by %lld items" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Der Tresor „%1$@“ wird noch von %2$lld Element verwendet"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Der Tresor „%1$@“ wird noch von %2$lld Elementen verwendet"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The Vault “%@” is still used by %lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The Vault “%@” is still used by %lld items"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "These stop until the Vault is unlocked again: %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese funktionieren erst wieder, wenn der Tresor entsperrt ist: %@."
           }
         }
       }
@@ -4731,22 +7421,22 @@
         }
       }
     },
-    "This folder" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diesen Ordner"
-          }
-        }
-      }
-    },
     "This folder is empty." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dieser Ordner ist leer."
+          }
+        }
+      }
+    },
+    "This is an encrypted Vault folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das ist ein verschlüsselter Tresor-Ordner"
           }
         }
       }
@@ -4811,6 +7501,69 @@
         }
       }
     },
+    "This overlaps the Offline Item “%@” (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das überschneidet sich mit dem Offline-Element „%1$@“ (%2$@)"
+          }
+        }
+      }
+    },
+    "This provider only supports public links" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Anbieter unterstützt nur öffentliche Links"
+          }
+        }
+      }
+    },
+    "This selection is not supported" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Auswahl wird nicht unterstützt"
+          }
+        }
+      }
+    },
+    "This sync run did not complete." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Synchronisationslauf wurde nicht abgeschlossen."
+          }
+        }
+      }
+    },
+    "This Vault is already added" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Tresor ist bereits hinzugefügt"
+          }
+        }
+      }
+    },
+    "This Vault is already in CloudWire" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Tresor ist bereits in CloudWire"
+          }
+        }
+      }
+    },
     "Time" : {
       "localizations" : {
         "de" : {
@@ -4821,22 +7574,22 @@
         }
       }
     },
-    "Timing" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Zeitplan"
-          }
-        }
-      }
-    },
     "Top level" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Oberste Ebene"
+          }
+        }
+      }
+    },
+    "Transferred" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Übertragen"
           }
         }
       }
@@ -4881,6 +7634,27 @@
         }
       }
     },
+    "Unlock it so the Mounts and Offline Items in it work again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entsperre ihn, damit Laufwerke und Offline-Elemente darin wieder funktionieren."
+          }
+        }
+      }
+    },
+    "Unlock the Vault first" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entsperre zuerst den Tresor"
+          }
+        }
+      }
+    },
     "Unlock “%@”" : {
       "localizations" : {
         "de" : {
@@ -4911,6 +7685,17 @@
         }
       }
     },
+    "Unmounting “%@” reported a problem" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Auswerfen von „%@“ ist ein Problem aufgetreten"
+          }
+        }
+      }
+    },
     "Until I Resume" : {
       "localizations" : {
         "de" : {
@@ -4921,12 +7706,12 @@
         }
       }
     },
-    "Until Tomorrow 08:00" : {
+    "Until Tomorrow %@" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bis morgen 08:00"
+            "value" : "Bis morgen %@"
           }
         }
       }
@@ -5021,6 +7806,17 @@
         }
       }
     },
+    "Vault %@ not found" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor %@ nicht gefunden"
+          }
+        }
+      }
+    },
     "Vault locked" : {
       "localizations" : {
         "de" : {
@@ -5061,6 +7857,102 @@
         }
       }
     },
+    "Vault – already encrypted" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor – bereits verschlüsselt"
+          }
+        }
+      }
+    },
+    "Vault – unlock it and make it available offline under Vaults" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor – entsperren und unter Tresore offline verfügbar machen"
+          }
+        }
+      }
+    },
+    "Vault “%@” created at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor „%1$@“ in %2$@ erstellt"
+          }
+        }
+      }
+    },
+    "Vault “%@” is locked" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor „%@“ ist gesperrt"
+          }
+        }
+      }
+    },
+    "Vault “%@” locked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor „%@“ gesperrt"
+          }
+        }
+      }
+    },
+    "Vault “%@” opened" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor „%@“ geöffnet"
+          }
+        }
+      }
+    },
+    "Vault “%@” removed from this Mac (cloud data unchanged)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor „%@“ von diesem Mac entfernt (Cloud-Daten unverändert)"
+          }
+        }
+      }
+    },
+    "Vault “%@” reset with its Recovery Key" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor „%@“ mit seinem Wiederherstellungsschlüssel zurückgesetzt"
+          }
+        }
+      }
+    },
+    "Vault “%@” unlocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tresor „%@“ entsperrt"
+          }
+        }
+      }
+    },
     "Vault: %@" : {
       "localizations" : {
         "de" : {
@@ -5087,6 +7979,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Die Prüfung hat Abweichungen gefunden. Das Original wurde behalten."
+          }
+        }
+      }
+    },
+    "Verification of the encrypted copy in “%@” found %lld differences; the original is kept" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Die Prüfung der verschlüsselten Kopie in „%1$@“ hat %2$lld Abweichung gefunden; das Original bleibt erhalten"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Die Prüfung der verschlüsselten Kopie in „%1$@“ hat %2$lld Abweichungen gefunden; das Original bleibt erhalten"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Verification of the encrypted copy in “%@” found %lld difference; the original is kept"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Verification of the encrypted copy in “%@” found %lld differences; the original is kept"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Verified. The original can be deleted now." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geprüft. Das Original kann jetzt gelöscht werden."
           }
         }
       }
@@ -5221,6 +8164,26 @@
         }
       }
     },
+    "You can do this later in the Overview." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du kannst das später in der Übersicht erledigen."
+          }
+        }
+      }
+    },
+    "You can now delete the original in Vaults." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du kannst das Original jetzt unter Tresore löschen."
+          }
+        }
+      }
+    },
     "You get a one-time Recovery Key next. Without the password or the Recovery Key the data cannot be recovered." : {
       "localizations" : {
         "de" : {
@@ -5246,7 +8209,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Deine Cloud, verkabelt mit deinem Mac."
+            "value" : "Deine Cloud, direkt auf deinem Mac."
           }
         }
       }
@@ -5256,7 +8219,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Deine Cloud, verkabelt mit deinem Mac. Alles streamen, Wichtiges offline mit SSD-Geschwindigkeit."
+            "value" : "Deine Cloud, direkt auf deinem Mac. Streame alles und halte Wichtiges offline – mit SSD-Geschwindigkeit."
           }
         }
       }
@@ -5271,12 +8234,56 @@
         }
       }
     },
-    "Your Recovery Key" : {
+    "“%@” already exists and is not empty" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dein Wiederherstellungsschlüssel"
+            "value" : "„%@“ existiert bereits und ist nicht leer"
+          }
+        }
+      }
+    },
+    "“%@” cannot be used as a Vault name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ kann nicht als Tresorname verwendet werden"
+          }
+        }
+      }
+    },
+    "“%@” holds encrypted Vault data. Unlock the Vault and make it available offline under Vaults." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ enthält verschlüsselte Tresordaten. Entsperre den Tresor und mach ihn unter „Tresore“ offline verfügbar."
+          }
+        }
+      }
+    },
+    "“%@” is mounted from localhost" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist über localhost eingebunden"
+          }
+        }
+      }
+    },
+    "“%@” is not a valid server address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist keine gültige Serveradresse"
           }
         }
       }
@@ -5287,6 +8294,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "„%@“ ist erforderlich."
+          }
+        }
+      }
+    },
+    "“%@” is still used by %lld items" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "„%1$@“ wird noch von %2$lld Element verwendet"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "„%1$@“ wird noch von %2$lld Elementen verwendet"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "“%@” is still used by %lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "“%@” is still used by %lld items"
+                }
+              }
+            }
           }
         }
       }
@@ -5347,6 +8395,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "„%@“ muss true oder false sein."
+          }
+        }
+      }
+    },
+    "① What should be available offline?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "① Was soll offline verfügbar sein?"
+          }
+        }
+      }
+    },
+    "② Where should the offline copy be stored?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "② Wo soll die Offline-Kopie liegen?"
+          }
+        }
+      }
+    },
+    "✓ Selected" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✓ Ausgewählt"
           }
         }
       }

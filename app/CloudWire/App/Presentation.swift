@@ -24,12 +24,14 @@ enum ErrorText {
                             message: error.localizedDescription)
     }
 
+    /// The Core's detail sentence in the user's language (raw rclone text stays as it is); errors without a
+    /// message code keep their own message.
     static func detail(for error: CoreError) -> String {
-        if error.code == "connection.inUse", !error.dependents.isEmpty {
+        if ["connection.inUse", "vault.inUse"].contains(error.code), !error.dependents.isEmpty {
             let list = error.dependents.map { "\($0.name) (\(dependentKind($0.kind)))" }.joined(separator: ", ")
             return String(localized: "Still used by: \(list). Remove these first.")
         }
-        return error.message
+        return error.text?.localized() ?? error.message
     }
 
     static func dependentKind(_ kind: String) -> String {
@@ -59,6 +61,7 @@ enum ErrorText {
         case "offline.storageNotEmpty": return String(localized: "The storage location is not empty")
         case "offline.locationMissing": return String(localized: "The storage location is missing")
         case "offline.vaultLocked": return String(localized: "The Vault is locked")
+        case "offline.vaultFolder": return String(localized: "This is an encrypted Vault folder")
         case "share.unsupported": return String(localized: "Sharing is not supported here")
         case "share.serverPolicy": return String(localized: "The server's sharing policy requires more settings")
         case "share.failed": return String(localized: "Sharing failed")
@@ -69,6 +72,12 @@ enum ErrorText {
         case "vault.exists": return String(localized: "A Vault with this name already exists")
         case "vault.invalidFormat": return String(localized: "This is not a valid CloudWire Vault")
         case "vault.sourceIsOffline": return String(localized: "Offline Items cannot be encrypted in place")
+        case "vault.ioFailed": return String(localized: "The Vault could not be read or written")
+        case "vault.deleteFailed": return String(localized: "The original could not be deleted completely")
+        case "vault.inUse": return String(localized: "The Vault is still in use")
+        case "vault.alreadyAdded": return String(localized: "This Vault is already in CloudWire")
+        case "client.selection": return String(localized: "This selection is not supported")
+        case "rpc.-32602": return String(localized: "Please check your input")
         case CoreError.notConnectedCode, CoreError.disconnectedCode, CoreError.socketCode, CoreError.timeoutCode:
             return String(localized: "CloudWire's background service is not reachable")
         default: return String(localized: "Something went wrong")
@@ -138,8 +147,8 @@ extension OfflineState {
     var color: Color {
         switch self {
         case .idle: return .green
-        case .syncing, .pending: return .orange
-        case .paused: return .secondary
+        case .syncing: return .orange
+        case .pending, .paused: return .secondary
         case .error, .needsConfirmation: return .red
         default: return .secondary
         }
@@ -148,7 +157,8 @@ extension OfflineState {
     var symbol: String {
         switch self {
         case .idle: return "checkmark.circle.fill"
-        case .syncing, .pending: return "arrow.triangle.2.circlepath.circle.fill"
+        case .syncing: return "arrow.triangle.2.circlepath.circle.fill"
+        case .pending: return "clock.fill"
         case .paused: return "pause.circle.fill"
         case .error: return "exclamationmark.circle.fill"
         case .needsConfirmation: return "exclamationmark.triangle.fill"
@@ -163,7 +173,7 @@ enum PauseReason {
         switch id {
         case "studioMode": return String(localized: "Studio Mode")
         case "battery": return String(localized: "Battery power")
-        case "meteredNetwork": return String(localized: "Metered network")
+        case "meteredNetwork": return String(localized: "Personal hotspot or Low Data Mode")
         case "cpu": return String(localized: "High CPU load")
         case "manual": return String(localized: "Paused manually")
         case "location-missing": return String(localized: "Storage location missing")
@@ -197,7 +207,7 @@ extension ActivityLevel {
 extension ActivityCategory {
     var label: String {
         switch self {
-        case .core: return String(localized: "Core")
+        case .core: return String(localized: "Background Service")
         case .mount: return String(localized: "Mounts")
         case .offline: return String(localized: "Offline")
         case .sync: return String(localized: "Sync")
@@ -217,7 +227,7 @@ extension ShareKind {
         case .user: return String(localized: "User")
         case .group: return String(localized: "Group")
         case .email: return String(localized: "Email")
-        default: return rawValue
+        default: return String(localized: "Other share")
         }
     }
 

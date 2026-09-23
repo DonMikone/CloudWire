@@ -8,24 +8,37 @@ struct MountsView: View {
 
     var body: some View {
         SectionScaffold(title: String(localized: "Mounts"),
-                        subtitle: String(localized: "Cloud folders as drives in Finder, streamed on demand.")) {
+                        subtitle: String(localized: "Cloud folders in Finder, streamed on demand.")) {
             Button {
                 editorTarget = .new(connectionId: nil, remotePath: "")
             } label: {
                 Label("New Mount", systemImage: "plus")
             }
             .disabled(model.mountableConnections.isEmpty)
+            .help(model.mountableConnections.isEmpty ? Text("Add a Connection first.") : Text("New Mount"))
         } content: {
             if model.mounts.isEmpty {
                 ContentUnavailableView {
                     Label("No Mounts", systemImage: SidebarSection.mounts.symbol)
                 } description: {
-                    Text("A Mount shows a cloud folder as a drive in Finder. Files download when you open them.")
+                    if model.mountableConnections.isEmpty {
+                        Text("Add a Connection first.")
+                    } else {
+                        Text("A Mount shows a cloud folder in Finder. Files download when you open them.")
+                    }
                 } actions: {
-                    Button("New Mount") { editorTarget = .new(connectionId: nil, remotePath: "") }
+                    if model.mountableConnections.isEmpty {
+                        Button("Add Connection") {
+                            model.selection = .connections
+                            model.showAddConnection = true
+                        }
                         .buttonStyle(.borderedProminent)
-                        .disabled(model.mountableConnections.isEmpty)
+                    } else {
+                        Button("New Mount") { editorTarget = .new(connectionId: nil, remotePath: "") }
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(model.mounts) { mount in
@@ -50,7 +63,7 @@ struct MountsView: View {
                 }
             }
         } message: { _ in
-            Text("The drive is ejected and removed from CloudWire. Files in the cloud are not touched.")
+            Text("The Mount is ejected and removed from CloudWire. Files in the cloud are not touched.")
         }
     }
 }
@@ -84,9 +97,9 @@ private struct MountRow: View {
                 Text(Format.remote(model.connectionName(mount.connectionId), mount.remotePath))
                     .font(.callout).foregroundStyle(.secondary)
                 Text(CorePaths.abbreviate(mount.mountPoint))
-                    .font(.caption).foregroundStyle(.tertiary)
+                    .font(.caption).foregroundStyle(.secondary)
                 if mount.state == .error, !mount.error.isEmpty {
-                    InlineError(message: mount.error)
+                    InlineError(mount.errorText, rawHeadline: String(localized: "The drive could not be mounted"))
                 }
             }
             Spacer()
@@ -107,6 +120,7 @@ private struct MountRow: View {
         .padding(.vertical, 6)
         .contextMenu {
             Button("Show in Finder") { model.showInFinder(mount.mountPoint) }
+                .disabled(!mount.isMounted)
             Button("Edit…", action: onEdit)
             Divider()
             Button("Delete…", role: .destructive, action: onDelete)
@@ -143,6 +157,7 @@ struct MountEditor: View {
     @State private var form = OptionFormModel(options: [], hideContext: .commandLine)
     @State private var optionBlocks: [(String, [RcloneOption])] = []
     @State private var browsing = false
+    @State private var draftPath = ""
     @State private var busy = false
     @State private var error: String?
     @State private var loaded = false
@@ -157,7 +172,7 @@ struct MountEditor: View {
 
     var body: some View {
         SheetScaffold(title: existing == nil ? String(localized: "New Mount") : String(localized: "Edit Mount"),
-                      width: 640) {
+                      width: 620) {
             FormDetailPicker(selection: $detail)
             if detail == .simple {
                 simpleForm
@@ -174,15 +189,24 @@ struct MountEditor: View {
         .task { await load() }
     }
 
+    /// The name the Core gives a Mount without one: the connection name plus the folder name.
+    private var defaultVolumeName: String {
+        let connection = model.connectionName(connectionId)
+        let folder = remotePath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+            .split(separator: "/").last.map(String.init)
+        guard let folder else { return connection }
+        return "\(connection) – \(folder)"
+    }
+
     private var defaultMountPoint: String {
         let folder = model.settings.mountFolder
-        let name = volumeName.isEmpty ? String(localized: "Name") : volumeName
-        return "\(folder)/\(name)"
+        let name = volumeName.trimmingCharacters(in: .whitespaces)
+        return "\(folder)/\(name.isEmpty ? defaultVolumeName : name)"
     }
 
     private var simpleForm: some View {
         Form {
-            TextField("Name", text: $volumeName, prompt: Text(model.connectionName(connectionId)))
+            TextField("Name", text: $volumeName, prompt: Text(defaultVolumeName))
             Picker("Connection", selection: $connectionId) {
                 ForEach(model.mountableConnections) { connection in
                     Text(connection.kind == .vault
@@ -196,23 +220,44 @@ struct MountEditor: View {
                     TextField("Cloud folder", text: $remotePath, prompt: Text("Whole connection"))
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
-                    Button("Browse…") { browsing = true }
-                        .disabled(connectionId.isEmpty)
-                        .popover(isPresented: $browsing) {
-                            VStack(alignment: .trailing) {
-                                RemoteBrowser(connectionId: connectionId, path: $remotePath)
-                                    .frame(width: 420, height: 320)
-                                Button("Use This Folder") { browsing = false }
+                        .multilineTextAlignment(.leading)
+                    Button("Browse…") {
+                        draftPath = remotePath
+                        browsing = true
+                    }
+                    .disabled(connectionId.isEmpty)
+                    .popover(isPresented: $browsing) {
+                        VStack(alignment: .trailing) {
+                            RemoteBrowser(connectionId: connectionId, path: $draftPath)
+                                .frame(width: 420, height: 320)
+                            HStack {
+                                Button("Cancel") { browsing = false }
+                                    .keyboardShortcut(.cancelAction)
+                                Button("Use This Folder") {
+                                    remotePath = draftPath
+                                    browsing = false
+                                }
+                                .keyboardShortcut(.defaultAction)
                             }
-                            .padding()
                         }
+                        .padding()
+                    }
                 }
             }
             FolderField(title: "Mount point", path: $mountPoint, placeholder: defaultMountPoint,
-                        message: String(localized: "Choose an empty folder for the drive."))
+                        message: String(localized: "Choose an empty folder for the Mount."))
             Toggle("Read-only", isOn: $readOnly)
-            Stepper(value: $cacheGB, in: 1...4096) {
-                LabeledContent("Cache size", value: String(localized: "\(cacheGB) GB"))
+            LabeledContent("Cache size") {
+                HStack(spacing: 4) {
+                    TextField("Cache size", value: Binding(get: { cacheGB }, set: { cacheGB = min(max($0, 1), 4096) }),
+                              format: .number)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 70)
+                        .textFieldStyle(.roundedBorder)
+                    Stepper("Cache size", value: $cacheGB, in: 1...4096).labelsHidden()
+                    Text("GB").foregroundStyle(.secondary)
+                }
             }
             Toggle("Mount automatically", isOn: $autoMount)
             Picker("Technology", selection: $mountType) {
@@ -231,7 +276,7 @@ struct MountEditor: View {
 
     private var advancedForm: some View {
         Form {
-            if optionBlocks.isEmpty {
+            if optionBlocks.isEmpty && error == nil {
                 ProgressView()
             }
             ForEach(optionBlocks, id: \.0) { block in
@@ -268,7 +313,8 @@ struct MountEditor: View {
             func filtered(_ options: [RcloneOption]) -> [RcloneOption] {
                 options.filter { !Self.simpleOptionNames.contains($0.name) && $0.hide & 1 == 0 }
             }
-            let blocks = [("VFS", filtered(info.vfs)), ("Mount", filtered(info.mount)), ("NFS", filtered(info.nfs))]
+            let blocks = [("VFS", filtered(info.vfs)), (String(localized: "Mount"), filtered(info.mount)),
+                          ("NFS", filtered(info.nfs))]
             optionBlocks = blocks.filter { !$0.1.isEmpty }
             form = OptionFormModel(options: info.vfs + info.mount + info.nfs, hideContext: .commandLine,
                                    initialValues: existing?.options ?? [:])
@@ -322,3 +368,16 @@ struct MountEditor: View {
         }
     }
 }
+
+#if DEBUG
+// MARK: - Snapshot seams
+
+extension MountEditor {
+    /// Opens with the advanced rclone options (`--export-snapshots`).
+    static func snapshotAdvanced(target: MountEditorTarget) -> MountEditor {
+        var editor = MountEditor(target: target)
+        editor._detail = State(initialValue: .advanced)
+        return editor
+    }
+}
+#endif

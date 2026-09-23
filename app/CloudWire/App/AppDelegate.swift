@@ -85,6 +85,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    /// Cmd+Q is replaced by "Close Windows" (CloudWireApp). A plain quit request (Dock menu,
+    /// AppleScript) does the same while the menu bar icon keeps the App reachable; logout,
+    /// restart, shutdown and CloudWire's own terminate calls quit.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard WindowRouter.isPlainQuitEvent(NSAppleEventManager.shared().currentAppleEvent),
+              UserDefaults.standard.bool(forKey: "menuBarIcon")
+        else { return .terminateNow }
+        WindowRouter.shared.closeAllWindows()
+        return .terminateCancel
+    }
+
     @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
         guard let text = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
             let url = URL(string: text)

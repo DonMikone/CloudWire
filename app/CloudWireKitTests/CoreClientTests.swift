@@ -114,7 +114,7 @@ struct CoreClientTests {
         #expect(resultA.first?.size == 7)
     }
 
-    @Test("application errors map to CoreError(code, message) with extra data")
+    @Test("application errors map to CoreError(code, message) with extra data and their text")
     func applicationError() async throws {
         let (client, peer) = try await makePair()
 
@@ -122,13 +122,15 @@ struct CoreClientTests {
         let request = try await peer.readRequest()
         #expect(request.method == "connections.delete")
         #expect(request.params["id"] as? String == "abc")
-        peer.write(#"{"jsonrpc":"2.0","id":\#(request.id),"error":{"code":-32000,"message":"generic","data":{"code":"connection.inUse","message":"Still used by 1 Mount","dependents":[{"kind":"mount","id":"m1","name":"Musik"}]}}}"# + "\n")
+        peer.write(#"{"jsonrpc":"2.0","id":\#(request.id),"error":{"code":-32000,"message":"generic","data":{"code":"connection.inUse","message":"\"Musik\" is still used by 1 item(s)","key":"connection.inUse","params":{"name":"Musik","count":"1"},"dependents":[{"kind":"mount","id":"m1","name":"Musik"}]}}}"# + "\n")
 
         let error = await #expect(throws: CoreError.self) { try await call.value }
         #expect(error?.code == "connection.inUse")
-        #expect(error?.message == "Still used by 1 Mount")
+        #expect(error?.message == "\"Musik\" is still used by 1 item(s)")
         #expect(error?.dependents.map(\.name) == ["Musik"])
         #expect(error?.dependents.first?.kind == "mount")
+        #expect(error?.text?.code == "connection.inUse")
+        #expect(error?.text?.params == ["name": "Musik", "count": "1"])
     }
 
     @Test("protocol errors map to rpc.<code>")

@@ -10,7 +10,7 @@ struct OfflineView: View {
     var body: some View {
         @Bindable var model = model
         SectionScaffold(title: String(localized: "Offline"),
-                        subtitle: String(localized: "Folders and files kept as real local files, synced in the background.")) {
+                        subtitle: String(localized: "Cloud folders and files as real local copies, synced in the background.")) {
             HStack {
                 Button {
                     model.syncNow()
@@ -19,7 +19,7 @@ struct OfflineView: View {
                 }
                 .disabled(model.offlineItems.isEmpty)
                 Button {
-                    adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "", remotePath: "",
+                    adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "", remotePath: nil,
                                           kind: .folder, files: [])
                 } label: {
                     Label("Add", systemImage: "plus")
@@ -29,7 +29,7 @@ struct OfflineView: View {
         } content: {
             VStack(spacing: 0) {
                 ForEach(model.offlineItems.filter { $0.state == .needsConfirmation }) { item in
-                    MassDeleteBanner(item: item)
+                    MassDeleteBanner(item: item, onHistory: { history = item })
                         .padding(.horizontal, 20)
                         .padding(.bottom, 10)
                 }
@@ -37,15 +37,24 @@ struct OfflineView: View {
                     ContentUnavailableView {
                         Label("No Offline Items", systemImage: SidebarSection.offline.symbol)
                     } description: {
-                        Text("Make a cloud folder available offline to work with it at full SSD speed. Changes sync both ways in the background.")
-                    } actions: {
-                        Button("Add Offline Item") {
-                            adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "",
-                                                  remotePath: "", kind: .folder, files: [])
+                        if model.mountableConnections.isEmpty {
+                            Text("Add a Connection first.")
+                        } else {
+                            Text("Make a cloud folder available offline to work with it at full SSD speed. Changes sync both ways in the background.")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.mountableConnections.isEmpty)
+                    } actions: {
+                        if model.mountableConnections.isEmpty {
+                            Button("Add Connection…") { model.showAddConnection = true }
+                                .buttonStyle(.borderedProminent)
+                        } else {
+                            Button("Add Offline Item") {
+                                adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "",
+                                                      remotePath: nil, kind: .folder, files: [])
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
                         ForEach(model.offlineItems) { item in
@@ -56,13 +65,13 @@ struct OfflineView: View {
                 }
             }
         }
-        .sheet(item: $adding) { draft in
+        .sheet(item: $adding, onDismiss: consumeDraft) { draft in
             AddOfflineSheet(draft: draft)
         }
-        .sheet(item: $editingExcludes) { item in
+        .sheet(item: $editingExcludes, onDismiss: consumeDraft) { item in
             ExcludesSheet(item: item)
         }
-        .sheet(item: $history) { item in
+        .sheet(item: $history, onDismiss: consumeDraft) { item in
             SyncHistorySheet(item: item)
         }
         .confirmationDialog(
@@ -71,22 +80,28 @@ struct OfflineView: View {
             presenting: model.offlineRemoval
         ) { item in
             Button("Move Local Copy to Trash") { model.removeOffline(item, localCopy: .trash) }
-                .keyboardShortcut(.defaultAction)
             Button("Keep Local Copy") { model.removeOffline(item, localCopy: .keep) }
+                .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) {}
         } message: { item in
-            Text("Syncing stops for \(CorePaths.abbreviate(item.storagePath)). The cloud is never touched.")
+            Text(removalMessage(item))
         }
         .onAppear { consumeDraft() }
         .onChange(of: model.offlineDraft) { _, _ in consumeDraft() }
     }
 
-    /// Opens the add sheet for a draft handed over by Finder or a Vault.
+    private func removalMessage(_ item: OfflineItem) -> String {
+        let message = String(localized: "Syncing stops for \(CorePaths.abbreviate(item.storagePath)). The cloud is never touched.")
+        guard item.state != .idle else { return message }
+        return message + " " + String(localized: "Changes that are not synced yet are no longer uploaded.")
+    }
+
+    /// Opens the add sheet for a draft handed over by Finder or a Vault. While another sheet is open the
+    /// draft waits in the model and is taken when that sheet closes.
     private func consumeDraft() {
-        if let draft = model.offlineDraft {
-            model.offlineDraft = nil
-            adding = draft
-        }
+        guard adding == nil, editingExcludes == nil, history == nil, let draft = model.offlineDraft else { return }
+        model.offlineDraft = nil
+        adding = draft
     }
 }
 
@@ -95,6 +110,7 @@ private struct OfflineRow: View {
     let item: OfflineItem
     let onExcludes: () -> Void
     let onHistory: () -> Void
+    @State private var relocating = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -107,14 +123,17 @@ private struct OfflineRow: View {
                 Text(Format.remote(model.connectionName(item.connectionId), item.remotePath))
                     .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 Text(CorePaths.abbreviate(item.storagePath))
-                    .font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
-                if item.state == .syncing, let progress = item.progress {
-                    ProgressView(value: progress.fraction ?? 0) {
-                        EmptyView()
-                    } currentValueLabel: {
-                        Text(progressText(progress)).font(.caption)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if relocating {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Moving…").font(.caption)
                     }
-                    .frame(maxWidth: 360)
+                } else if item.state == .syncing, let progress = item.progress {
+                    progressView(progress)
+                }
+                if item.state == .error && !item.reason.isEmpty {
+                    InlineError(item.errorText)
                 }
             }
             Spacer()
@@ -127,18 +146,30 @@ private struct OfflineRow: View {
             actionsMenu
         }
         .padding(.vertical, 6)
-        .contextMenu { menuItems }
+        .contextMenu { if !relocating { menuItems } }
     }
 
     private var stateText: String {
-        if (item.state == .paused || item.state == .error) && !item.reason.isEmpty {
-            return item.state == .paused ? "\(item.state.label): \(PauseReason.label(item.reason))"
-                : "\(item.state.label): \(item.reason)"
+        if item.state == .paused && !item.reason.isEmpty {
+            return "\(item.state.label): \(PauseReason.label(item.reason))"
         }
         return item.state.label
     }
 
+    /// Without a known total the bar is indeterminate and only the transferred bytes are shown.
+    private func progressView(_ progress: SyncProgress) -> some View {
+        ProgressView(value: progress.fraction) {
+            EmptyView()
+        } currentValueLabel: {
+            Text(progressText(progress)).font(.caption)
+        }
+        .frame(maxWidth: 360)
+    }
+
     private func progressText(_ progress: SyncProgress) -> String {
+        guard progress.fraction != nil else {
+            return String(localized: "\(Format.bytes(progress.bytes)) transferred")
+        }
         var text = String(localized: "\(Format.bytes(progress.bytes)) of \(Format.bytes(progress.totalBytes))")
         if let eta = progress.eta, eta > 0 {
             text += " · " + String(localized: "\(Format.duration(seconds: eta)) left")
@@ -154,6 +185,9 @@ private struct OfflineRow: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .disabled(relocating)
+        .help("More Actions")
+        .accessibilityLabel(Text("Actions for “\(item.displayName)”"))
     }
 
     @ViewBuilder
@@ -172,35 +206,57 @@ private struct OfflineRow: View {
             message: String(localized: "Choose the new storage location. The local files are moved there, nothing is downloaded again."),
             startingAt: (item.storagePath as NSString).deletingLastPathComponent)
         else { return }
+        relocating = true
         model.perform {
+            defer { relocating = false }
             model.updated(try await model.client.relocateOfflineItem(id: item.id, newPath: path))
         }
     }
 }
 
-/// Mass-Delete Guard banner with both choices.
+/// Mass-Delete Guard banner: what happened on which side, both choices and the way to the history.
 struct MassDeleteBanner: View {
     @Environment(AppModel.self) private var model
     let item: OfflineItem
+    let onHistory: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill").font(.title2).foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Sync stopped: “\(item.displayName)”").font(.headline)
-                Text("More than half of the files would be deleted. Confirm the deletion only if you removed them on purpose.")
+                Text(explanation + " " + String(localized: "Confirm the deletion only if it is intended."))
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("Confirm Deletion", role: .destructive) { model.confirmMassDelete(item, action: .delete) }
                     Button("Don't Delete – Restore Files") { model.confirmMassDelete(item, action: .restore) }
                         .buttonStyle(.borderedProminent)
+                    Button("Show Sync History…", action: onHistory)
+                        .buttonStyle(.link)
                 }
             }
             Spacer()
         }
         .padding(14)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Neutral wording: the deletions may come from someone else, e.g. in a shared cloud folder.
+    private var explanation: String {
+        guard let info = item.massDelete else {
+            return String(localized: "More than half of the files would be deleted.")
+        }
+        switch (info.reason, info.side) {
+        case ("tooManyDeletes", "cloud"):
+            return String(localized: "\(info.deletes) of \(info.total) files were deleted in the cloud. Syncing would delete them in the local copy as well.")
+        case ("tooManyDeletes", _):
+            return String(localized: "\(info.deletes) of \(info.total) files were deleted in the local copy. Syncing would delete them in the cloud as well.")
+        case (_, "cloud"):
+            return String(localized: "All files were changed in the cloud.")
+        default:
+            return String(localized: "All files were changed in the local copy.")
+        }
     }
 }
 
@@ -212,10 +268,9 @@ struct AddOfflineSheet: View {
     let draft: OfflineDraft
 
     @State private var connectionId = ""
-    @State private var path = ""
-    @State private var kind: OfflineKind = .folder
-    @State private var selectedFiles: Set<String> = []
-    @State private var storagePath: String?
+    @State private var selection = OfflineSelection()
+    /// The folder chosen via "Change…"; CloudWire creates the offline folder inside it.
+    @State private var storageParent: String?
     @State private var preflight: PreflightResult?
     @State private var checking = false
     @State private var creating = false
@@ -225,48 +280,47 @@ struct AddOfflineSheet: View {
 
     var body: some View {
         SheetScaffold(title: String(localized: "Make Available Offline"), width: 640) {
-            Form {
-                Picker("Connection", selection: $connectionId) {
-                    ForEach(model.mountableConnections) { connection in
-                        Text(model.connectionName(connection.id)).tag(connection.id)
-                    }
+            Picker("Connection", selection: $connectionId) {
+                ForEach(model.mountableConnections) { connection in
+                    Text(model.connectionName(connection.id)).tag(connection.id)
                 }
-                Picker("Make offline", selection: $kind) {
-                    Text("This folder").tag(OfflineKind.folder)
-                    Text("Selected files").tag(OfflineKind.files)
-                }
-                .pickerStyle(.segmented)
             }
-            .formStyle(.grouped)
-            .frame(height: 110)
+            .fixedSize()
 
-            if !connectionId.isEmpty {
-                RemoteBrowser(connectionId: connectionId, path: $path, selectsFiles: kind == .files,
-                              selectedFiles: $selectedFiles)
-                    .frame(height: 240)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("① What should be available offline?").font(.headline)
+                if !connectionId.isEmpty {
+                    RemoteBrowser(connectionId: connectionId, selection: $selection)
+                        .frame(height: 260)
+                }
+                selectionSummary
             }
 
-            GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
-                    LabeledContent("Storage location") {
-                        HStack {
-                            Text(CorePaths.abbreviate(preflight?.storagePath ?? storagePath ?? "…"))
-                                .lineLimit(1).truncationMode(.middle)
-                                .foregroundStyle(.secondary)
-                            Button("Change…") { chooseLocation() }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("② Where should the offline copy be stored?").font(.headline)
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("Storage location") {
+                            HStack {
+                                Text(storageLocationText)
+                                    .lineLimit(1).truncationMode(.middle)
+                                    .foregroundStyle(.secondary)
+                                Button("Change…") { chooseLocation() }
+                            }
+                        }
+                        if checking {
+                            ProgressView().controlSize(.small)
+                        } else if let preflight {
+                            Text("Cloud size \(Format.bytes(preflight.remoteBytes)) · free on disk \(Format.bytes(preflight.freeBytes))")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if !preflight.hasEnoughSpace {
+                                InlineError(message: String(localized: "Not enough free space: about \(Format.bytes(Int64(Double(preflight.remoteBytes) * 1.1))) needed, \(Format.bytes(preflight.freeBytes)) free. Use “Change…” to choose a storage location on another volume."))
+                            }
                         }
                     }
-                    if checking {
-                        ProgressView().controlSize(.small)
-                    } else if let preflight {
-                        Text("Cloud size \(Format.bytes(preflight.remoteBytes)) · free on disk \(Format.bytes(preflight.freeBytes))")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if !preflight.hasEnoughSpace {
-                            InlineError(message: String(localized: "Not enough free space: at least 1.1 × the cloud size is required."))
-                        }
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(4)
                 }
-                .padding(4)
             }
             if let error { InlineError(message: error) }
         } buttons: {
@@ -279,33 +333,81 @@ struct AddOfflineSheet: View {
             guard !prepared else { return }
             prepared = true
             connectionId = draft.connectionId.isEmpty ? (model.mountableConnections.first?.id ?? "") : draft.connectionId
-            path = draft.remotePath
-            kind = draft.kind
-            selectedFiles = Set(draft.files)
+            selection = draft.remotePath.map { OfflineSelection(kind: draft.kind, remotePath: $0, files: draft.files) }
+                ?? OfflineSelection()
         }
-        .task(id: preflightKey) { await runPreflight() }
-        .confirmationDialog(String(localized: "The chosen folder is not empty"), isPresented: $askMerge) {
+        .onChange(of: connectionId) { old, _ in
+            // Paths belong to the previous Connection: start over at its root.
+            if !old.isEmpty { selection = OfflineSelection() }
+        }
+        .task(id: PreflightKey(connectionId: connectionId, target: selection.target, storagePath: storagePath)) {
+            await runPreflight()
+        }
+        .confirmationDialog(
+            String(localized: "“\(CorePaths.abbreviate(storagePath ?? preflight?.storagePath ?? ""))” already exists and is not empty"),
+            isPresented: $askMerge
+        ) {
             Button("Merge (Newer Version Wins)") { create(merge: true) }
             Button("Choose Another Folder") { chooseLocation() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("CloudWire can merge the existing files with the cloud; for files present on both sides the newer version wins.")
+            Text("Merging syncs everything already in this folder with the cloud: files only here are uploaded, and for files present on both sides the newer version wins.")
         }
     }
 
-    private var preflightKey: String {
-        "\(connectionId)|\(path)|\(kind.rawValue)|\(selectedFiles.sorted().joined(separator: "/"))|\(storagePath ?? "")"
+    private struct PreflightKey: Equatable {
+        let connectionId: String
+        let target: OfflineSelection.Target?
+        let storagePath: String?
+    }
+
+    /// The full storage path for a chosen parent folder, recomputed for every selection; nil leaves the
+    /// default (base folder/Connection/cloud path) to the Core.
+    private var storagePath: String? {
+        guard let storageParent, let target = selection.target else { return nil }
+        return (storageParent as NSString).appendingPathComponent(
+            target.storageFolderName(connectionName: model.connectionName(connectionId)))
+    }
+
+    private var storageLocationText: String {
+        if let path = storagePath ?? (selection.target == nil ? nil : preflight?.storagePath) {
+            return CorePaths.abbreviate(path)
+        }
+        return String(localized: "Set after the selection (in \(CorePaths.abbreviate(storageParent ?? model.settings.baseFolder)))")
+    }
+
+    @ViewBuilder
+    private var selectionSummary: some View {
+        if let target = selection.target {
+            Label(summaryText(target), systemImage: target.kind == .files ? "doc.on.doc" : "folder")
+                .font(.callout)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        } else {
+            Text("Select a folder or files.").font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private func summaryText(_ target: OfflineSelection.Target) -> String {
+        let folderName = target.remotePath.isEmpty
+            ? model.connectionName(connectionId) : (target.remotePath as NSString).lastPathComponent
+        guard let files = target.files else {
+            return String(localized: "Selected: folder “\(folderName)”")
+        }
+        if files.count == 1 {
+            return String(localized: "Selected: “\(files[0])”")
+        }
+        return String(localized: "Selected: \(files.count) files in “\(folderName)”")
     }
 
     private var canCreate: Bool {
-        guard !connectionId.isEmpty, !creating, !checking else { return false }
-        if kind == .files && selectedFiles.isEmpty { return false }
+        guard !connectionId.isEmpty, selection.target != nil, !creating, !checking else { return false }
         if let preflight, !preflight.hasEnoughSpace { return false }
         return preflight != nil
     }
 
     private func runPreflight() async {
-        guard prepared, !connectionId.isEmpty, kind == .folder || !selectedFiles.isEmpty else {
+        guard prepared, !connectionId.isEmpty, let target = selection.target else {
             preflight = nil
             return
         }
@@ -316,8 +418,8 @@ struct AddOfflineSheet: View {
         defer { checking = false }
         do {
             let result = try await model.client.offlinePreflight(
-                connectionId: connectionId, kind: kind, remotePath: path,
-                files: kind == .files ? selectedFiles.sorted() : nil, storagePath: storagePath)
+                connectionId: connectionId, kind: target.kind, remotePath: target.remotePath,
+                files: target.files, storagePath: storagePath)
             guard !Task.isCancelled else { return }
             preflight = result
         } catch is CancellationError {
@@ -329,27 +431,28 @@ struct AddOfflineSheet: View {
     }
 
     private func chooseLocation() {
-        if let chosen = Panels.chooseFolder(
-            message: String(localized: "Choose where the offline copy is stored, for example on an external SSD."),
-            startingAt: preflight?.storagePath ?? model.settings.baseFolder)
-        {
-            storagePath = chosen
+        let message = selection.target.map {
+            String(localized: "Choose the folder in which CloudWire creates “\($0.storageFolderName(connectionName: model.connectionName(connectionId)))” for the offline copy, for example on an external SSD.")
+        } ?? String(localized: "Choose the folder in which CloudWire creates the folder for the offline copy, for example on an external SSD.")
+        let start = storageParent ?? preflight.map { ($0.storagePath as NSString).deletingLastPathComponent }
+        if let chosen = Panels.chooseFolder(message: message, startingAt: start ?? model.settings.baseFolder) {
+            storageParent = chosen
         }
     }
 
     private func create(merge: Bool) {
+        guard let target = selection.target else { return }
         if !merge, preflight?.storageNonEmpty == true {
             askMerge = true
             return
         }
         creating = true
         error = nil
-        let files = kind == .files ? selectedFiles.sorted() : nil
-        let (connectionId, path, kind, storagePath) = (connectionId, path, kind, storagePath)
+        let (connectionId, storagePath) = (connectionId, storagePath)
         Task {
             do {
                 let item = try await model.client.createOfflineItem(
-                    connectionId: connectionId, kind: kind, remotePath: path, files: files,
+                    connectionId: connectionId, kind: target.kind, remotePath: target.remotePath, files: target.files,
                     storagePath: storagePath, excludes: nil, mergeExisting: merge)
                 model.updated(item)
                 dismiss()
@@ -377,9 +480,11 @@ struct ExcludesSheet: View {
     @State private var filter = ""
     @State private var busy = false
     @State private var error: String?
+    /// nil while the option list loads; `.failure` keeps the item's advanced options untouched on save.
+    @State private var options: Result<Void, any Error>?
 
     var body: some View {
-        SheetScaffold(title: String(localized: "Excludes & Advanced"), width: 640) {
+        SheetScaffold(title: String(localized: "Excludes & Advanced: \(item.displayName)"), width: 640) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Excluded files and folders (one pattern per line)").font(.headline)
                 TextEditor(text: $excludes)
@@ -395,10 +500,20 @@ struct ExcludesSheet: View {
                     Spacer()
                     TextField("Filter", text: $filter).textFieldStyle(.roundedBorder).frame(width: 200)
                 }
-                Form {
-                    OptionFormView(form: $form, options: visibleOptions, showsNames: true)
+                Group {
+                    switch options {
+                    case nil:
+                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    case .failure(let failure)?:
+                        InlineError(message: String(localized: "The rclone options could not be loaded and stay unchanged: \(ErrorText.alert(for: failure).message)"))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    case .success?:
+                        Form {
+                            OptionFormView(form: $form, options: visibleOptions, showsNames: true)
+                        }
+                        .formStyle(.grouped)
+                    }
                 }
-                .formStyle(.grouped)
                 .frame(height: 260)
             }
             Text("Changing excludes or options makes the next sync compare both sides completely.")
@@ -406,30 +521,75 @@ struct ExcludesSheet: View {
             if let error { InlineError(message: error) }
         } buttons: {
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-            Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(busy)
+            Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(busy || options == nil)
         }
         .task {
             excludes = item.excludes.joined(separator: "\n")
-            if let info = try? await model.loadMainOptions() {
+            do {
+                let info = try await model.loadMainOptions()
                 form = OptionFormModel(options: info.main, hideContext: .commandLine,
                                        initialValues: OptionFormModel.textValues(fromTyped: item.advanced, options: info.main))
+                options = .success(())
+            } catch is CancellationError {
+            } catch {
+                options = .failure(error)
             }
         }
     }
 
     private var visibleOptions: [RcloneOption] {
-        let all = form.visibleOptions()
+        let all = form.visibleOptions().map(Self.localized)
         guard !filter.isEmpty else { return all }
         return all.filter { $0.name.localizedCaseInsensitiveContains(filter) || $0.help.localizedCaseInsensitiveContains(filter) }
     }
 
+    /// rclone's help is English; the options people actually change get CloudWire's own text
+    /// (first line = label, rest = details), everything else keeps rclone's text.
+    private static func localized(_ option: RcloneOption) -> RcloneOption {
+        let help: String
+        switch option.name {
+        case "transfers":
+            help = String(localized: "Parallel transfers\nHow many files are copied at the same time.")
+        case "checkers":
+            help = String(localized: "Parallel checks\nHow many files are compared at the same time.")
+        case "retries":
+            help = String(localized: "Retries of a failed sync\nHow often a whole sync is tried again after an error.")
+        case "low_level_retries":
+            help = String(localized: "Retries of single requests\nHow often a single failed request to the cloud is repeated.")
+        case "bwlimit":
+            help = String(localized: "Bandwidth limit\nMaximum transfer speed, e.g. 10M for 10 MiB/s, or off.")
+        case "buffer_size":
+            help = String(localized: "Buffer per transfer\nMemory used to read ahead for each file being transferred.")
+        case "timeout":
+            help = String(localized: "Idle timeout\nA transfer without any data for this long is aborted.")
+        case "contimeout":
+            help = String(localized: "Connection timeout\nHow long to wait while connecting to the server.")
+        case "tpslimit":
+            help = String(localized: "Requests per second\nLimits requests to the cloud per second; 0 means no limit.")
+        case "multi_thread_streams":
+            help = String(localized: "Streams per large file\nHow many parts of one large file are transferred at the same time.")
+        case "max_size":
+            help = String(localized: "Maximum file size\nLarger files are skipped, e.g. 2G, or off.")
+        case "min_size":
+            help = String(localized: "Minimum file size\nSmaller files are skipped, e.g. 1k, or off.")
+        default:
+            return option
+        }
+        var copy = option
+        copy.help = help
+        return copy
+    }
+
     private func save() {
-        let advanced: [String: JSONValue]
-        do {
-            advanced = try form.typedValues(keyedBy: .fieldName)
-        } catch {
-            self.error = ErrorText.alert(for: error).message
-            return
+        // Without the option list the form is empty: sending it would erase the item's options.
+        var advanced: [String: JSONValue]?
+        if case .success = options {
+            do {
+                advanced = try form.typedValues(keyedBy: .fieldName)
+            } catch {
+                self.error = ErrorText.alert(for: error).message
+                return
+            }
         }
         let patterns = excludes.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -456,42 +616,83 @@ struct SyncHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
     let item: OfflineItem
 
-    @State private var runs: [SyncRun] = []
+    /// nil while loading.
+    @State private var runs: [SyncRun]?
+    @State private var loadError: String?
     @State private var selected: SyncRun.ID?
 
     var body: some View {
         SheetScaffold(title: String(localized: "Sync History: \(item.displayName)"), width: 720) {
-            HSplitView {
-                List(runs, selection: $selected) { run in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(Format.dateTime(ms: run.startedAt))
-                        Text(runSummary(run)).font(.caption).foregroundStyle(run.status == "ok" ? Color.secondary : Color.red)
-                    }
-                    .tag(run.id)
-                }
-                .frame(minWidth: 240)
-                Group {
-                    if let run = runs.first(where: { $0.id == selected }) {
-                        RunFilesView(runId: run.id, error: run.error)
-                    } else {
-                        Text("Select a sync run to see its files.").foregroundStyle(.secondary)
+            Group {
+                if let loadError {
+                    InlineError(message: loadError)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if let runs {
+                    if runs.isEmpty {
+                        Text("No sync runs yet.").foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        runList(runs)
                     }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(minWidth: 320)
             }
             .frame(height: 380)
         } buttons: {
             Button("Close") { dismiss() }.keyboardShortcut(.defaultAction)
         }
         .task {
-            runs = (try? await model.client.syncRuns(itemId: item.id, limit: 100)) ?? []
-            selected = runs.first?.id
+            do {
+                let loaded = try await model.client.syncRuns(itemId: item.id, limit: 100)
+                runs = loaded
+                selected = loaded.first?.id
+            } catch is CancellationError {
+            } catch {
+                let alert = ErrorText.alert(for: error)
+                loadError = "\(alert.title): \(alert.message)"
+            }
+        }
+    }
+
+    private func runList(_ runs: [SyncRun]) -> some View {
+        HSplitView {
+            List(runs, selection: $selected) { run in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Format.dateTime(ms: run.startedAt))
+                    Text(runSummary(run)).font(.caption).foregroundStyle(run.status == "ok" ? Color.secondary : Color.red)
+                }
+                .tag(run.id)
+            }
+            .frame(minWidth: 240)
+            Group {
+                if let run = runs.first(where: { $0.id == selected }) {
+                    RunFilesView(runId: run.id, error: run.error)
+                } else {
+                    Text("Select a sync run to see its files.").foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(minWidth: 320)
         }
     }
 
     private func runSummary(_ run: SyncRun) -> String {
-        String(localized: "\(run.status): \(run.transferred) transferred, \(run.deleted) deleted, \(run.conflicts) conflicts")
+        [statusText(run.status),
+         String(localized: "\(run.transferred) transferred"),
+         String(localized: "\(run.deleted) deleted"),
+         String(localized: "\(run.conflicts) conflicts")].joined(separator: " · ")
+    }
+
+    private func statusText(_ status: String) -> String {
+        switch status {
+        case "ok": return String(localized: "Successful")
+        case "error": return String(localized: "Failed")
+        case "massDelete": return String(localized: "Stopped by the Mass-Delete Guard")
+        case "stopped": return String(localized: "Stopped")
+        case "": return String(localized: "Running")
+        default: return status
+        }
     }
 }
 
@@ -500,23 +701,45 @@ struct RunFilesView: View {
     @Environment(AppModel.self) private var model
     let runId: Int64
     var error: String = ""
-    @State private var files: [SyncRunFile] = []
+    /// nil while loading.
+    @State private var files: [SyncRunFile]?
+    @State private var loadError: String?
 
     var body: some View {
         VStack(alignment: .leading) {
-            if !error.isEmpty { InlineError(message: error) }
-            List(files) { file in
+            if !error.isEmpty {
+                InlineError(message: String(localized: "This sync run did not complete."), detail: error)
+            }
+            if let loadError { InlineError(message: loadError) }
+            List(files ?? []) { file in
                 HStack {
-                    Image(systemName: symbol(file.action)).foregroundStyle(color(file.action))
+                    Image(systemName: symbol(file.action))
+                        .foregroundStyle(color(file.action))
+                        .frame(width: 18)
+                        .help(actionLabel(file.action))
+                        .accessibilityLabel(actionLabel(file.action))
                     Text(file.path).textSelection(.enabled)
                 }
             }
             .overlay {
-                if files.isEmpty { Text("No files changed.").foregroundStyle(.secondary) }
+                if files == nil && loadError == nil {
+                    ProgressView().controlSize(.small)
+                } else if files?.isEmpty == true {
+                    Text("No files changed.").foregroundStyle(.secondary)
+                }
             }
         }
         .task(id: runId) {
-            files = (try? await model.client.syncRunFiles(runId: runId)) ?? []
+            // The previous run's files must not stay visible while this one loads.
+            files = nil
+            loadError = nil
+            do {
+                files = try await model.client.syncRunFiles(runId: runId)
+            } catch is CancellationError {
+            } catch {
+                let alert = ErrorText.alert(for: error)
+                loadError = "\(alert.title): \(alert.message)"
+            }
         }
     }
 
@@ -526,6 +749,15 @@ struct RunFilesView: View {
         case "deleted": return "trash"
         case "conflict": return "exclamationmark.triangle.fill"
         default: return "doc"
+        }
+    }
+
+    private func actionLabel(_ action: String) -> String {
+        switch action {
+        case "transferred": return String(localized: "Transferred")
+        case "deleted": return String(localized: "Deleted")
+        case "conflict": return String(localized: "Conflict")
+        default: return action
         }
     }
 

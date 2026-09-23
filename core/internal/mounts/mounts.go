@@ -16,11 +16,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
 	"github.com/DonMikone/CloudWire/core/internal/api"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/notify"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
@@ -56,8 +59,12 @@ type Notifier interface {
 // DTO is the contract's Mount object.
 type DTO struct {
 	store.Mount
-	State string `json:"state"`
-	Error string `json:"error"`
+	State       string     `json:"state"`
+	Error       string     `json:"error"`
+	ErrorCode   string     `json:"errorCode,omitempty"`
+	ErrorParams msg.Params `json:"errorParams,omitempty"`
+	// MountedAt is when the Mount last came up (Unix ms); only set while mounted.
+	MountedAt *int64 `json:"mountedAt"`
 }
 
 // Service implements the mounts.* methods.
@@ -85,7 +92,7 @@ type run struct {
 	m          store.Mount
 	worker     *sv.Worker
 	state      string
-	err        string
+	err        msg.Text      // zero = no error
 	stop       chan struct{} // closed to stop supervising
 	done       chan struct{} // closed when supervise returned
 	retrigger  chan struct{} // wakes a Mount parked in the error state
@@ -119,7 +126,11 @@ func (s *Service) dto(m store.Mount) DTO {
 	defer s.mu.Unlock()
 	d := DTO{Mount: m, State: StateUnmounted}
 	if r := s.runs[m.ID]; r != nil {
-		d.State, d.Error = r.state, r.err
+		d.State, d.Error, d.ErrorCode, d.ErrorParams = r.state, r.err.Message, r.err.Code, r.err.Params
+		if r.state == StateMounted && !r.mountedAt.IsZero() {
+			ms := r.mountedAt.UnixMilli()
+			d.MountedAt = &ms
+		}
 	}
 	return d
 }
@@ -132,7 +143,7 @@ func (s *Service) publish(m store.Mount) {
 func (s *Service) Get(id string) (store.Mount, error) {
 	m, err := s.st.Mount(id)
 	if errors.Is(err, store.ErrNotFound) {
-		return m, api.Errorf("mount.notFound", "Mount %s not found", id)
+		return m, api.Fail("mount.notFound", msg.New("mount.notFound", "id", id))
 	}
 	return m, err
 }
@@ -175,7 +186,7 @@ func sanitizeName(s string) string {
 func (s *Service) Create(ctx context.Context, p CreateParams) (DTO, error) {
 	conn, err := s.st.Connection(p.ConnectionID)
 	if err != nil {
-		return DTO{}, api.Errorf("connection.notFound", "Connection %s not found", p.ConnectionID)
+		return DTO{}, api.Fail("connection.notFound", msg.New("connection.notFound", "id", p.ConnectionID))
 	}
 	st, err := s.st.Settings()
 	if err != nil {
@@ -213,11 +224,11 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (DTO, error) {
 	}
 	if err := s.st.InsertMount(m); err != nil {
 		if store.IsUniqueViolation(err) {
-			return DTO{}, api.Errorf("mount.pointInUse", "Another Mount already uses %s", m.MountPoint)
+			return DTO{}, api.Fail("mount.pointInUse", msg.New("mount.pointInUse", "path", m.MountPoint))
 		}
 		return DTO{}, err
 	}
-	s.log.Info("mount", m.ID, fmt.Sprintf("Mount %q created at %s", m.VolumeName, m.MountPoint), nil)
+	s.log.Info("mount", m.ID, msg.New("mount.created", "name", m.VolumeName, "path", m.MountPoint), nil)
 	if m.AutoMount {
 		s.start(m)
 	}
@@ -232,7 +243,7 @@ func (s *Service) validate(m *store.Mount, existingID string) error {
 	case "nfsmount":
 	case "cmount":
 		if f := Fuse(); !f.FuseT && !f.MacFUSE {
-			return api.Errorf("mount.fuseUnavailable", "FUSE requires FUSE-T or macFUSE to be installed")
+			return api.Fail("mount.fuseUnavailable", msg.New("mount.fuseUnavailable"))
 		}
 	default:
 		return api.Invalid("unknown mount type %q", m.MountType)
@@ -251,7 +262,7 @@ func (s *Service) validate(m *store.Mount, existingID string) error {
 	}
 	for _, o := range all {
 		if o.ID != existingID && o.MountPoint == mp {
-			return api.Errorf("mount.pointInUse", "Another Mount already uses %s", mp)
+			return api.Fail("mount.pointInUse", msg.New("mount.pointInUse", "path", mp))
 		}
 	}
 	items, err := s.st.OfflineItems()
@@ -261,27 +272,27 @@ func (s *Service) validate(m *store.Mount, existingID string) error {
 	for _, it := range items {
 		// An Offline Item would sync the streamed Mount content back into the cloud.
 		if paths.IsWithin(mp, it.StoragePath) || paths.IsWithin(it.StoragePath, mp) {
-			return api.Errorf("mount.pointInUse", "%s overlaps the Offline Item stored at %s", mp, it.StoragePath)
+			return api.Fail("mount.pointInUse", msg.New("mount.pointOverlapsOffline", "path", mp, "storagePath", it.StoragePath))
 		}
 	}
 	if IsMounted(mp) {
-		return api.Errorf("mount.pointInUse", "%s is already a mounted volume", mp)
+		return api.Fail("mount.pointInUse", msg.New("mount.pointIsVolume", "path", mp))
 	}
 	if err := os.MkdirAll(mp, 0o755); err != nil {
-		return api.Errorf("mount.failed", "Cannot create %s: %v", mp, err)
+		return api.Fail("mount.failed", msg.New("path.createFailed", "path", mp, "detail", err))
 	}
 	f, err := os.Open(mp)
 	if err != nil {
-		return api.Errorf("mount.failed", "Cannot open %s: %v", mp, err)
+		return api.Fail("mount.failed", msg.New("path.openFailed", "path", mp, "detail", err))
 	}
 	defer f.Close()
 	names, err := f.Readdirnames(-1)
 	if err != nil && err != io.EOF {
-		return api.Errorf("mount.failed", "Cannot read %s: %v", mp, err)
+		return api.Fail("mount.failed", msg.New("path.readFailed", "path", mp, "detail", err))
 	}
 	for _, n := range names {
 		if n != ".DS_Store" && n != ".localized" {
-			return api.Errorf("mount.pointNotEmpty", "The folder %s is not empty", mp)
+			return api.Fail("mount.pointNotEmpty", msg.New("folder.notEmpty", "path", mp))
 		}
 	}
 	return nil
@@ -350,7 +361,7 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (DTO, error) {
 	if wasActive {
 		s.start(m)
 	}
-	s.log.Info("mount", m.ID, fmt.Sprintf("Mount %q updated", m.VolumeName), nil)
+	s.log.Info("mount", m.ID, msg.New("mount.updated", "name", m.VolumeName), nil)
 	d := s.dto(m)
 	s.pub.Publish("mount.status", d)
 	return d, nil
@@ -369,7 +380,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if !IsMounted(m.MountPoint) {
 		_ = os.Remove(m.MountPoint) // only succeeds when empty
 	}
-	s.log.Info("mount", id, fmt.Sprintf("Mount %q removed", m.VolumeName), nil)
+	s.log.Info("mount", id, msg.New("mount.removed", "name", m.VolumeName), nil)
 	s.pub.Publish("mount.status", DTO{Mount: m, State: "deleted"})
 	return nil
 }
@@ -406,7 +417,7 @@ func (s *Service) UnmountByID(ctx context.Context, id string) (DTO, error) {
 		return DTO{}, err
 	}
 	s.stop(id, true)
-	s.log.Info("mount", id, fmt.Sprintf("Mount %q unmounted", m.VolumeName), nil)
+	s.log.Info("mount", id, msg.New("mount.unmounted", "name", m.VolumeName), nil)
 	d := s.dto(m)
 	s.pub.Publish("mount.status", d)
 	return d, nil
@@ -422,13 +433,13 @@ func (s *Service) Stats(ctx context.Context, id string) (any, error) {
 	}
 	s.mu.Unlock()
 	if w == nil {
-		return nil, api.Errorf("mount.failed", "Mount is not active")
+		return nil, api.Fail("mount.failed", msg.New("mount.inactive"))
 	}
-	msg, err := w.Stats(5 * time.Second)
+	st, err := w.Stats(5 * time.Second)
 	if err != nil {
-		return nil, api.Errorf("mount.failed", "%v", err)
+		return nil, api.Wrap("mount.failed", err)
 	}
-	return msg.VFS, nil
+	return st.VFS, nil
 }
 
 func (s *Service) active(id string) bool {
@@ -605,7 +616,7 @@ func (s *Service) stop(id string, wait bool) {
 		// no server behind it any more it must be detached here.
 		if IsOwnMount(r.m.MountPoint) {
 			if err := ForceUnmount(r.m.MountPoint); err != nil {
-				s.log.Error("mount", r.m.ID, fmt.Sprintf("Could not unmount %q: %v", r.m.VolumeName, err), nil)
+				s.log.Error("mount", r.m.ID, msg.New("mount.unmountFailed", "name", r.m.VolumeName, "detail", err), nil)
 			}
 		}
 	}
@@ -619,7 +630,7 @@ func (s *Service) stop(id string, wait bool) {
 func (s *Service) stopWorker(m store.Mount, w *sv.Worker) {
 	w.Stop(10 * time.Second)
 	if out := w.Outcome(); out.Error != "" {
-		s.log.Warn("mount", m.ID, fmt.Sprintf("Unmounting %q: %s", m.VolumeName, out.Error), nil)
+		s.log.Warn("mount", m.ID, msg.New("mount.unmountProblem", "name", m.VolumeName, "detail", out.Error), nil)
 	}
 }
 
@@ -633,9 +644,10 @@ func (s *Service) park(r *run) bool {
 	}
 }
 
-func (s *Service) setState(r *run, state, errText string) {
+// setState sets r's state and error (msg.Text{} = no error).
+func (s *Service) setState(r *run, state string, t msg.Text) {
 	s.mu.Lock()
-	r.state, r.err = state, errText
+	r.state, r.err = state, t
 	s.mu.Unlock()
 	s.publish(r.m)
 }
@@ -741,7 +753,7 @@ func (s *Service) supervise(r *run) {
 		reattach := r.m.MountType == "nfsmount" && port != 0 && attachedBefore && IsOwnMount(r.m.MountPoint)
 		if !reattach {
 			if IsMounted(r.m.MountPoint) && !IsOwnMount(r.m.MountPoint) {
-				s.setState(r, StateError, fmt.Sprintf("%s is used by another volume", r.m.MountPoint))
+				s.setState(r, StateError, msg.New("mount.pointBusy", "path", r.m.MountPoint))
 				if !s.park(r) {
 					return
 				}
@@ -752,7 +764,7 @@ func (s *Service) supervise(r *run) {
 			}
 			if IsMounted(r.m.MountPoint) {
 				// Still attached (unmount failed): never stat it, retry later.
-				s.setState(r, StateMounting, "the previous mount is still attached")
+				s.setState(r, StateMounting, msg.New("mount.stillAttached"))
 				if !s.failed(r, &backoff) {
 					return
 				}
@@ -762,7 +774,7 @@ func (s *Service) supervise(r *run) {
 			if r.m.MountType == "nfsmount" {
 				p, err := freePort()
 				if err != nil {
-					s.setState(r, StateError, err.Error())
+					s.setState(r, StateError, api.TextOf(err))
 					if !s.park(r) {
 						return
 					}
@@ -776,19 +788,20 @@ func (s *Service) supervise(r *run) {
 		}
 		job, err := s.job(r.m, port)
 		if err != nil {
-			s.setState(r, StateError, err.Error())
+			s.setState(r, StateError, api.TextOf(err))
 			if !s.park(r) {
 				return
 			}
 			continue
 		}
-		s.setState(r, StateMounting, "")
-		mounted := make(chan struct{}, 1)
+		s.setState(r, StateMounting, msg.Text{})
+		// Carries the worker's warning ("" = none) of the "mounted" message.
+		mounted := make(chan string, 1)
 		w, err := sv.Spawn(job, sv.Secrets{ConfigPass: s.configPass}, sv.Handlers{
 			OnMsg: func(m sv.Msg) {
 				if m.Type == "mounted" {
 					select {
-					case mounted <- struct{}{}:
+					case mounted <- m.Error:
 					default:
 					}
 				}
@@ -796,7 +809,7 @@ func (s *Service) supervise(r *run) {
 			OnLog: func(l sv.LogLine) { s.onLog(r.m, l) },
 		})
 		if err != nil {
-			s.setState(r, StateError, err.Error())
+			s.setState(r, StateError, api.TextOf(err))
 			if !s.failed(r, &backoff) {
 				return
 			}
@@ -816,17 +829,21 @@ func (s *Service) supervise(r *run) {
 			return
 		}
 		select {
-		case <-mounted:
+		case warning := <-mounted:
 			attachedBefore = true
 			s.mu.Lock()
 			r.mountedAt, r.healthFail = time.Now(), 0
 			s.mu.Unlock()
-			s.setState(r, StateMounted, "")
-			how := "Mounted"
+			s.setState(r, StateMounted, msg.Text{})
+			code := "mount.mounted"
 			if reattach {
-				how = "Reconnected"
+				code = "mount.reconnected"
 			}
-			s.log.Info("mount", r.m.ID, fmt.Sprintf("%s %q at %s", how, r.m.VolumeName, r.m.MountPoint), nil)
+			s.log.Info("mount", r.m.ID, msg.New(code, "name", r.m.VolumeName, "path", r.m.MountPoint), nil)
+			// Logged after mountedAt, so Recent Problems does not treat it as resolved.
+			if warning != "" {
+				s.log.Warn("mount", r.m.ID, msg.New("mount.servedFromLocalhost", "name", r.m.VolumeName, "detail", warning), nil)
+			}
 		case <-w.Done():
 			if reattach {
 				// The port could not be served again: start over with a fresh mount.
@@ -845,7 +862,7 @@ func (s *Service) supervise(r *run) {
 		r.worker = nil
 		s.mu.Unlock()
 		if out.Status == sv.StatusStopped && out.Error == "ejected" {
-			s.log.Info("mount", r.m.ID, fmt.Sprintf("Mount %q was ejected in Finder", r.m.VolumeName), nil)
+			s.log.Info("mount", r.m.ID, msg.New("mount.ejected", "name", r.m.VolumeName), nil)
 			s.mu.Lock()
 			if s.runs[r.m.ID] == r {
 				delete(s.runs, r.m.ID)
@@ -855,12 +872,12 @@ func (s *Service) supervise(r *run) {
 			s.publish(r.m)
 			return
 		}
-		msg := out.Error
-		if msg == "" {
-			msg = "mount worker exited"
+		reason := msg.Detail(out.Error)
+		if out.Error == "" {
+			reason = msg.New("mount.workerExited")
 		}
-		s.log.Warn("mount", r.m.ID, fmt.Sprintf("Mount %q stopped unexpectedly: %s", r.m.VolumeName, msg), nil)
-		s.setState(r, StateMounting, msg)
+		s.log.Warn("mount", r.m.ID, msg.New("mount.stoppedUnexpectedly", "name", r.m.VolumeName).Because(reason), nil)
+		s.setState(r, StateMounting, reason)
 		if !s.failed(r, &backoff) {
 			return
 		}
@@ -889,8 +906,9 @@ func (s *Service) failed(r *run, backoff *time.Duration) bool {
 	s.mu.Unlock()
 	if tooMany {
 		s.setState(r, StateError, errText)
-		s.log.Error("mount", r.m.ID, fmt.Sprintf("Mount %q failed repeatedly: %s", r.m.VolumeName, errText), nil)
-		s.notify.Notify(notify.KindError, map[string]any{"title": r.m.VolumeName, "message": errText, "subjectId": r.m.ID})
+		t := msg.New("mount.failedRepeatedly", "name", r.m.VolumeName).Because(errText)
+		s.log.Error("mount", r.m.ID, t, nil)
+		s.notify.Notify(notify.KindError, notify.ErrorParams(r.m.VolumeName, r.m.ID, t))
 		select {
 		case <-r.stop:
 			return false
@@ -929,10 +947,10 @@ func (s *Service) onLog(m store.Mount, l sv.LogLine) {
 	}
 	switch level {
 	case "error", "critical":
-		s.log.Error("mount", m.ID, l.Msg, map[string]string{"object": l.Object})
+		s.log.Error("mount", m.ID, msg.New("rclone.error", "detail", l.Msg), map[string]string{"object": l.Object})
 	default:
 		if s.log.Enabled("debug") {
-			s.log.Debug("mount", m.ID, l.Msg, map[string]string{"object": l.Object, "level": l.Level})
+			s.log.Debug("mount", m.ID, msg.Detail(l.Msg), map[string]string{"object": l.Object, "level": l.Level})
 		}
 	}
 }
@@ -990,7 +1008,7 @@ func (s *Service) healthCheck() {
 		fails := r.healthFail
 		s.mu.Unlock()
 		if fails >= 2 {
-			s.log.Warn("mount", r.m.ID, fmt.Sprintf("Mount %q is not responding; restarting it", r.m.VolumeName), nil)
+			s.log.Warn("mount", r.m.ID, msg.New("mount.notResponding", "name", r.m.VolumeName), nil)
 			w.Kill()
 			if r.m.MountType != "nfsmount" && IsOwnMount(r.m.MountPoint) {
 				// NFS Mounts are reconnected by the next worker on the same port.
@@ -1047,20 +1065,75 @@ func IsMounted(p string) bool {
 }
 
 // IsOwnMount reports whether p is a file system CloudWire mounted: an NFS
-// mount of a localhost server, or a FUSE (macFUSE / FUSE-T) mount of a
-// CloudWire remote. Only those are ever force-unmounted.
+// mount of its NFSHost (or of localhost, the fallback and the pre-0009
+// host), or a FUSE (macFUSE / FUSE-T) mount of a CloudWire remote. Only those
+// are ever force-unmounted.
 func IsOwnMount(p string) bool {
 	fstype, from, ok := mountInfo(p)
 	if !ok {
 		return false
 	}
 	switch {
-	case fstype == "nfs" && strings.HasPrefix(from, "localhost:"):
+	case fstype == "nfs" && (strings.HasPrefix(from, "localhost:") || strings.EqualFold(from, NFSHost(p)+":/")):
 		return true
 	case strings.HasPrefix(from, "cw-") || strings.HasPrefix(from, "cwvault-") || strings.HasPrefix(from, "fuse-t"):
 		return true // FUSE mounts carry the rclone remote name
 	}
 	return false
+}
+
+// NFSHost is the host an NFS Mount at mountPoint is attached from, which
+// Finder shows as the server name: the mount point's folder name plus
+// ".local" (see ADR 0009). Names mount_nfs or mDNS cannot carry (":" or
+// "\", empty labels, labels over 63 bytes) are reduced to letters, digits
+// and hyphens.
+func NFSHost(mountPoint string) string {
+	name := filepath.Base(filepath.Clean(mountPoint))
+	if !exactHostOK(name) {
+		name = dnsSafeLabel(name)
+	}
+	return name + ".local"
+}
+
+func exactHostOK(name string) bool {
+	if name == "" || name == "." || name == "/" || strings.ContainsAny(name, `:\`) || !utf8.ValidString(name) {
+		return false
+	}
+	for _, r := range name {
+		if !unicode.IsPrint(r) {
+			return false
+		}
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+	}
+	return true
+}
+
+var umlauts = strings.NewReplacer("ä", "ae", "ö", "oe", "ü", "ue", "Ä", "Ae", "Ö", "Oe", "Ü", "Ue", "ß", "ss")
+
+func dnsSafeLabel(name string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range umlauts.Replace(name) {
+		if r < utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	s := strings.TrimRight(b.String(), "-")
+	if len(s) > 63 {
+		s = strings.TrimRight(s[:63], "-")
+	}
+	if s == "" {
+		return "CloudWire"
+	}
+	return s
 }
 
 // mountInfo returns the file system type and source mounted at p, using

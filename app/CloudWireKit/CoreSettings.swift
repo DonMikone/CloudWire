@@ -37,7 +37,7 @@ public struct CoreSettings: Decodable, Sendable, Hashable {
         autostart = c.bool("autostart", true)
         menuBarIcon = c.bool("menuBarIcon", true)
         baseFolder = c.string("baseFolder", "~/CloudWire")
-        mountFolder = c.string("mountFolder", "~/CloudWire/Laufwerke")
+        mountFolder = c.string("mountFolder", "~/CloudWire/Mounts")
         quietPeriodSeconds = c.int("quietPeriodSeconds", 60)
         pollIntervalSeconds = c.int("pollIntervalSeconds", 60)
         nextcloudEtagSeconds = c.int("nextcloudEtagSeconds", 60)
@@ -120,7 +120,7 @@ public struct CoreSettings: Decodable, Sendable, Hashable {
         }
     }
 
-    public struct Bandwidth: Decodable, Sendable, Hashable {
+    public struct Bandwidth: Decodable, Sendable, Hashable, JSONRepresentable {
         public var enabled: Bool
         /// MiB/s; 0 = unlimited.
         public var uploadMiBps: Int
@@ -136,6 +136,29 @@ public struct CoreSettings: Decodable, Sendable, Hashable {
             enabled = c.bool("enabled", true)
             uploadMiBps = c.int("uploadMiBps", 5)
             downloadMiBps = c.int("downloadMiBps", 20)
+        }
+
+        /// The limit in effect for one direction in MiB/s (0 = unlimited). The App has no master
+        /// switch: a disabled limit shows as unlimited in both directions.
+        public func limit(_ side: KeyPath<Bandwidth, Int>) -> Int {
+            enabled ? max(0, self[keyPath: side]) : 0
+        }
+
+        /// These settings with the limit for `side` set to `value` (0 = unlimited). The result is
+        /// always enabled, and the other direction keeps the limit that was in effect.
+        public func settingLimit(_ side: WritableKeyPath<Bandwidth, Int>, to value: Int) -> Bandwidth {
+            var result = self
+            result.uploadMiBps = limit(\.uploadMiBps)
+            result.downloadMiBps = limit(\.downloadMiBps)
+            result.enabled = true
+            result[keyPath: side] = max(0, value)
+            return result
+        }
+
+        /// The merge patch value for the `bandwidth` settings key.
+        public var jsonValue: JSONValue {
+            .object(["enabled": .bool(enabled), "uploadMiBps": uploadMiBps.jsonValue,
+                     "downloadMiBps": downloadMiBps.jsonValue])
         }
     }
 

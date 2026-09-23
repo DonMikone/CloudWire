@@ -11,7 +11,7 @@ struct ConnectionsView: View {
     var body: some View {
         @Bindable var model = model
         SectionScaffold(title: String(localized: "Connections"),
-                        subtitle: String(localized: "Cloud accounts CloudWire can use.")) {
+                        subtitle: String(localized: "Cloud services and servers CloudWire uses.")) {
             Button {
                 model.showAddConnection = true
             } label: {
@@ -27,6 +27,7 @@ struct ConnectionsView: View {
                     Button("Add Connection") { model.showAddConnection = true }
                         .buttonStyle(.borderedProminent)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(model.remoteConnections) { connection in
@@ -43,16 +44,22 @@ struct ConnectionsView: View {
             EditConnectionSheet(connection: connection)
         }
         .confirmationDialog(
-            String(localized: "Delete “\(deleting?.name ?? "")”?"),
+            String(localized: "Delete the Connection “\(deleting?.name ?? "")”?"),
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
             presenting: deleting
         ) { connection in
             Button("Delete Connection", role: .destructive) { delete(connection) }
         } message: { _ in
-            Text("CloudWire forgets this account. Files in the cloud are not touched.")
+            Text("CloudWire forgets this Connection and its credentials. Files in the cloud stay untouched.")
         }
         .alert(item: $testResult) { result in
             Alert(title: Text(result.title), message: Text(result.message), dismissButton: .default(Text("OK")))
+        }
+        .task {
+            // Provider names for the row subtitles; the rows fall back to the type name.
+            if model.remoteConnections.contains(where: { !$0.isNextcloudLike }) {
+                _ = try? await model.loadProviders()
+            }
         }
     }
 
@@ -81,6 +88,13 @@ struct ConnectionsView: View {
             .help(Text("Delete"))
         }
         .padding(.vertical, 6)
+        .contextMenu {
+            Button("Test") { test(connection) }
+                .disabled(testing.contains(connection.id))
+            Button("Edit…") { editing = connection }
+            Divider()
+            Button("Delete…", role: .destructive) { deleting = connection }
+        }
     }
 
     private func subtitle(_ connection: Connection) -> String {
@@ -88,7 +102,7 @@ struct ConnectionsView: View {
             let vendor = connection.vendor == "owncloud" ? "ownCloud" : "Nextcloud"
             return [vendor, connection.user, connection.serverURL].filter { !$0.isEmpty }.joined(separator: " · ")
         }
-        return connection.provider
+        return model.providers.first { $0.name == connection.provider }?.shortName ?? connection.provider
     }
 
     private func test(_ connection: Connection) {
@@ -146,12 +160,15 @@ struct AddConnectionSheet: View {
     @State private var manual = false
     @State private var user = ""
     @State private var appPassword = ""
+    @State private var loginURL: URL?
 
     // Generic provider
     @State private var form = OptionFormModel(options: [])
     @State private var detail: FormDetail = .simple
     @State private var questionForm = OptionFormModel(options: [])
     @State private var setup = SetupTracker()
+    /// Provider of the connection being set up, for the title of follow-up questions.
+    @State private var setupProvider: String?
 
     var body: some View {
         SheetScaffold(title: title, width: 620) {
@@ -178,7 +195,7 @@ struct AddConnectionSheet: View {
                 if event.succeeded {
                     finish()
                 } else {
-                    error = event.error ?? String(localized: "The login did not complete.")
+                    error = event.errorMessage
                     step = .nextcloud
                 }
             }
@@ -190,7 +207,11 @@ struct AddConnectionSheet: View {
         case .choose: return String(localized: "Add Connection")
         case .nextcloud: return String(localized: "Add Nextcloud")
         case .provider(let name): return String(localized: "Add \(providerDescription(name))")
-        case .question: return String(localized: "Additional Setup")
+        case .question:
+            if let setupProvider {
+                return String(localized: "Additional Setup – \(providerDescription(setupProvider))")
+            }
+            return String(localized: "Additional Setup")
         case .waiting, .browserLogin: return String(localized: "Waiting for Your Browser")
         }
     }
@@ -244,12 +265,16 @@ struct AddConnectionSheet: View {
         case .waiting:
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
         case .browserLogin(let flowId):
+            if let loginURL {
+                Button("Open Browser Again") { NSWorkspace.shared.open(loginURL) }
+            }
             Button("Cancel Login") {
                 let client = model.client
                 Task { try? await client.nextcloudLoginCancel(flowId: flowId) }
                 step = .nextcloud
                 busy = false
             }
+            .keyboardShortcut(.cancelAction)
         }
     }
 
@@ -274,7 +299,7 @@ struct AddConnectionSheet: View {
                         step = .nextcloud
                     } label: {
                         HStack {
-                            Image(systemName: "cloud.fill").foregroundStyle(Color.accentColor)
+                            Image(systemName: "cloud.fill").foregroundStyle(Color.accentColor).frame(width: 20)
                             VStack(alignment: .leading) {
                                 Text("Nextcloud").font(.headline)
                                 Text("Recommended: log in with your browser, sharing included")
@@ -292,6 +317,7 @@ struct AddConnectionSheet: View {
                         select(provider)
                     } label: {
                         HStack {
+                            Image(systemName: "cloud").foregroundStyle(.secondary).frame(width: 20)
                             VStack(alignment: .leading) {
                                 Text(provider.description.isEmpty ? provider.name : provider.description)
                                 Text(provider.name).font(.caption).foregroundStyle(.secondary)
@@ -315,7 +341,7 @@ struct AddConnectionSheet: View {
 
     private func select(_ provider: RcloneProvider) {
         form = OptionFormModel(options: provider.options, hideContext: .configurator)
-        name = ""
+        name = provider.shortName
         detail = .simple
         error = nil
         step = .provider(provider.name)
@@ -359,13 +385,19 @@ struct AddConnectionSheet: View {
             do {
                 let start = try await model.client.nextcloudLoginStart(serverURL: serverURL, name: name)
                 step = .browserLogin(flowId: start.flowId)
+                loginURL = URL(string: start.loginURL)
                 if let loginEvent = model.loginEvents[start.flowId] {
                     model.loginEvents[start.flowId] = nil
-                    if loginEvent.succeeded { finish() } else { error = loginEvent.error; step = .nextcloud }
+                    if loginEvent.succeeded {
+                        finish()
+                    } else {
+                        error = loginEvent.errorMessage
+                        step = .nextcloud
+                    }
                     return
                 }
-                if let url = URL(string: start.loginURL) {
-                    NSWorkspace.shared.open(url)
+                if let loginURL {
+                    NSWorkspace.shared.open(loginURL)
                 }
             } catch {
                 busy = false
@@ -396,12 +428,9 @@ struct AddConnectionSheet: View {
 
     private var providerForm: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                TextField("Name", text: $name, prompt: Text("e.g. Google Drive"))
-                    .textFieldStyle(.roundedBorder)
-                FormDetailPicker(selection: $detail)
-            }
+            FormDetailPicker(selection: $detail)
             Form {
+                TextField("Name", text: $name, prompt: Text("e.g. Google Drive"))
                 OptionFormView(form: $form, options: form.visibleOptions(advanced: detail == .advanced))
             }
             .formStyle(.grouped)
@@ -417,6 +446,7 @@ struct AddConnectionSheet: View {
             let name = name.trimmingCharacters(in: .whitespaces)
             Task {
                 do {
+                    setupProvider = providerName
                     let result = try await model.client.createConnection(name: name, provider: providerName,
                                                                          parameters: parameters)
                     handle(result)
@@ -452,20 +482,23 @@ struct AddConnectionSheet: View {
             }
         } else if let option = configStep.option {
             questionForm = OptionFormModel(options: [option], hideContext: .configurator)
-            error = configStep.error.isEmpty ? nil : configStep.error
+            error = configStep.error.isEmpty ? nil : setupError(configStep)
             step = .question(configStep)
         } else {
-            error = configStep.error.isEmpty ? String(localized: "The provider setup stopped unexpectedly.") : configStep.error
+            error = configStep.error.isEmpty
+                ? String(localized: "The provider setup stopped unexpectedly.") : setupError(configStep)
         }
+    }
+
+    /// rclone's own reason stays as it is after a translated sentence.
+    private func setupError(_ configStep: ConfigStep) -> String {
+        configStep.errorText.localized(rawHeadline: String(localized: "The provider setup reported an error."))
     }
 
     private func questionView(_ configStep: ConfigStep) -> some View {
         Form {
             if let option = configStep.option {
-                OptionFieldRow(form: $questionForm, option: option)
-                if !option.help.isEmpty {
-                    Text(option.help).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                }
+                OptionFieldRow(form: $questionForm, option: option, detailsLineLimit: nil)
             }
         }
         .formStyle(.grouped)
@@ -546,32 +579,131 @@ struct EditConnectionSheet: View {
     @State private var detail: FormDetail = .simple
     @State private var busy = false
     @State private var error: String?
+    /// Whether the provider's options arrived; saving before would drop them.
+    @State private var optionsLoaded = false
+    // Signing a Nextcloud Connection in again
+    @State private var loginFlowId: String?
+    @State private var loginURL: URL?
+    @State private var signedInAgain = false
+
+    /// The rclone options shown. Nextcloud Connections are set up by signing in, so all their
+    /// WebDAV options are advanced.
+    private var options: [RcloneOption] {
+        guard connection.isNextcloudLike else { return form.visibleOptions(advanced: detail == .advanced) }
+        return detail == .advanced ? form.visibleOptions(advanced: false) + form.visibleOptions(advanced: true) : []
+    }
 
     var body: some View {
         SheetScaffold(title: String(localized: "Edit “\(connection.name)”"), width: 620) {
-            HStack {
-                TextField("Name", text: $name).textFieldStyle(.roundedBorder)
-                FormDetailPicker(selection: $detail)
-            }
+            FormDetailPicker(selection: $detail)
             Form {
-                OptionFormView(form: $form, options: form.visibleOptions(advanced: detail == .advanced))
+                TextField("Name", text: $name)
+                if connection.isNextcloudLike && detail == .simple {
+                    nextcloudAccount
+                } else if optionsLoaded {
+                    OptionFormView(form: $form, options: options)
+                } else if error == nil {
+                    ProgressView()
+                }
             }
             .formStyle(.grouped)
             .frame(height: 380)
-            Text("Leave password fields empty to keep the stored value.")
-                .font(.caption).foregroundStyle(.secondary)
+            if options.contains(where: \.isPassword) {
+                Text("Leave password fields empty to keep the stored value.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let error { InlineError(message: error) }
         } buttons: {
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-            Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(busy || name.isEmpty)
+            Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(busy || name.isEmpty || !optionsLoaded)
         }
         .task {
             name = connection.name
-            if let provider = try? await model.loadProviders().first(where: { $0.name == connection.provider }) {
-                form = OptionFormModel(options: provider.options, hideContext: .configurator,
-                                       initialValues: connection.parameters)
+            do {
+                if let provider = try await model.loadProviders().first(where: { $0.name == connection.provider }) {
+                    form = OptionFormModel(options: provider.options, hideContext: .configurator,
+                                           initialValues: connection.parameters)
+                }
+                optionsLoaded = true
+            } catch {
+                self.error = ErrorText.alert(for: error).message
             }
         }
+        .onChange(of: model.loginEvents) { _, events in
+            if let loginFlowId, let event = events[loginFlowId] {
+                model.loginEvents[loginFlowId] = nil
+                finishLogin(event)
+            }
+        }
+        .onDisappear { cancelLogin() }
+    }
+
+    // MARK: Nextcloud
+
+    @ViewBuilder
+    private var nextcloudAccount: some View {
+        LabeledContent("Server address", value: connection.serverURL)
+        LabeledContent("User name", value: connection.user)
+        LabeledContent("Sign-in") {
+            if loginFlowId != nil {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    if let loginURL {
+                        Button("Open Browser Again") { NSWorkspace.shared.open(loginURL) }
+                    }
+                    Button("Cancel Login") { cancelLogin() }
+                }
+            } else {
+                Button("Sign In Again in Browser") { startLogin() }
+            }
+        }
+        if loginFlowId != nil {
+            Text("Log in to your Nextcloud in the browser and grant access. CloudWire continues automatically.")
+                .font(.caption).foregroundStyle(.secondary)
+        } else if signedInAgain {
+            Label("Signed in again.", systemImage: "checkmark.circle")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func startLogin() {
+        error = nil
+        signedInAgain = false
+        Task {
+            do {
+                let start = try await model.client.nextcloudLoginRenew(connectionId: connection.id)
+                loginFlowId = start.flowId
+                loginURL = URL(string: start.loginURL)
+                // The event may already have arrived.
+                if let event = model.loginEvents[start.flowId] {
+                    model.loginEvents[start.flowId] = nil
+                    finishLogin(event)
+                    return
+                }
+                if let loginURL { NSWorkspace.shared.open(loginURL) }
+            } catch {
+                self.error = ErrorText.alert(for: error).message
+            }
+        }
+    }
+
+    private func finishLogin(_ event: NextcloudLoginEvent) {
+        loginFlowId = nil
+        loginURL = nil
+        if event.succeeded {
+            signedInAgain = true
+            Task { await model.refreshConnections() }
+        } else {
+            error = event.errorMessage
+        }
+    }
+
+    private func cancelLogin() {
+        guard let flowId = loginFlowId else { return }
+        loginFlowId = nil
+        loginURL = nil
+        let client = model.client
+        Task { try? await client.nextcloudLoginCancel(flowId: flowId) }
     }
 
     private func save() {
@@ -599,3 +731,65 @@ struct EditConnectionSheet: View {
         }
     }
 }
+
+extension NextcloudLoginEvent {
+    /// Why the browser login failed, translated; rclone's or the server's own reason stays as it is.
+    fileprivate var errorMessage: String {
+        let incomplete = String(localized: "The login did not complete.")
+        return errorText?.localized(rawHeadline: incomplete) ?? incomplete
+    }
+}
+
+#if DEBUG
+// MARK: - Snapshot seams
+
+extension AddConnectionSheet {
+    enum SnapshotStep {
+        case nextcloud(manual: Bool)
+        case provider(RcloneProvider, advanced: Bool)
+        case question(ConfigStep)
+        case waiting
+        case browserLogin
+    }
+
+    /// Opens on a later step with demo input (`--export-snapshots`).
+    static func snapshot(_ snapshotStep: SnapshotStep) -> AddConnectionSheet {
+        var sheet = AddConnectionSheet()
+        switch snapshotStep {
+        case .nextcloud(let manual):
+            sheet._step = State(initialValue: .nextcloud)
+            sheet._serverURL = State(initialValue: "cloud.example.com")
+            sheet._manual = State(initialValue: manual)
+            if manual {
+                sheet._user = State(initialValue: "mike")
+                sheet._appPassword = State(initialValue: "Xk3pQ-9aLm2-Rt7Vw-2Nc8e")
+            }
+        case .provider(let provider, let advanced):
+            sheet._step = State(initialValue: .provider(provider.name))
+            sheet._name = State(initialValue: provider.shortName)
+            sheet._form = State(initialValue: OptionFormModel(options: provider.options, hideContext: .configurator))
+            sheet._detail = State(initialValue: advanced ? .advanced : .simple)
+        case .question(let configStep):
+            sheet._step = State(initialValue: .question(configStep))
+            if let option = configStep.option {
+                sheet._questionForm = State(initialValue: OptionFormModel(options: [option], hideContext: .configurator))
+            }
+        case .waiting:
+            sheet._step = State(initialValue: .waiting(connectionId: "snapshot"))
+        case .browserLogin:
+            sheet._step = State(initialValue: .browserLogin(flowId: "snapshot"))
+            sheet._loginURL = State(initialValue: URL(string: "https://cloud.example.com/login/v2/flow"))
+        }
+        return sheet
+    }
+}
+
+extension EditConnectionSheet {
+    /// Opens with the advanced options (`--export-snapshots`).
+    static func snapshotAdvanced(connection: Connection) -> EditConnectionSheet {
+        var sheet = EditConnectionSheet(connection: connection)
+        sheet._detail = State(initialValue: .advanced)
+        return sheet
+    }
+}
+#endif

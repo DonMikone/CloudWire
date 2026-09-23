@@ -1,25 +1,57 @@
 import CloudWireKit
 import SwiftUI
+import UserNotifications
+
+/// The tabs of the Settings window.
+enum SettingsTab: Hashable, CaseIterable {
+    case general, sync, mounts, notifications, log, about
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .general: "General"
+        case .sync: "Sync"
+        case .mounts: "Mounts"
+        case .notifications: "Notifications"
+        case .log: "Log"
+        case .about: "About"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .sync: "arrow.triangle.2.circlepath"
+        case .mounts: SidebarSection.mounts.symbol
+        case .notifications: "bell"
+        case .log: "list.bullet.rectangle"
+        case .about: "info.circle"
+        }
+    }
+
+    @MainActor @ViewBuilder
+    var content: some View {
+        switch self {
+        case .general: GeneralSettings()
+        case .sync: SyncSettings()
+        case .mounts: MountSettings()
+        case .notifications: NotificationSettings()
+        case .log: LogSettings()
+        case .about: AboutSettings()
+        }
+    }
+}
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         Group {
-            if model.hasSettings {
+            if model.hasSettings && model.isConnected {
                 TabView {
-                    GeneralSettings()
-                        .tabItem { Label("General", systemImage: "gearshape") }
-                    SyncSettings()
-                        .tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
-                    MountSettings()
-                        .tabItem { Label("Mounts", systemImage: SidebarSection.mounts.symbol) }
-                    NotificationSettings()
-                        .tabItem { Label("Notifications", systemImage: "bell") }
-                    LogSettings()
-                        .tabItem { Label("Log", systemImage: "list.bullet.rectangle") }
-                    AboutSettings()
-                        .tabItem { Label("About", systemImage: "info.circle") }
+                    ForEach(SettingsTab.allCases, id: \.self) { tab in
+                        tab.content
+                            .tabItem { Label(tab.title, systemImage: tab.symbol) }
+                    }
                 }
             } else {
                 CoreUnavailableView().frame(height: 300)
@@ -30,19 +62,47 @@ struct SettingsView: View {
     }
 }
 
+#if DEBUG
+extension SettingsView {
+    /// The Settings window on `tab`, with a copy of its toolbar tabs, which offscreen rendering cannot
+    /// capture (`--export-snapshots`).
+    static func snapshot(tab: SettingsTab) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 2) {
+                ForEach(SettingsTab.allCases, id: \.self) { item in
+                    VStack(spacing: 3) {
+                        Image(systemName: item.symbol).font(.title2).frame(height: 24)
+                        Text(item.title).font(.caption)
+                    }
+                    .frame(width: 84, height: 52)
+                    .foregroundStyle(item == tab ? Color.accentColor : Color.secondary)
+                    .background(item == tab ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            Divider()
+            tab.content
+        }
+        .frame(width: 600)
+    }
+}
+#endif
+
 /// A folder setting shown with `~` and changed through an open panel.
 private struct FolderSetting: View {
     @Environment(AppModel.self) private var model
     let title: LocalizedStringKey
     let keyPath: WritableKeyPath<CoreSettings, String>
     let key: String
+    let message: String
 
     var body: some View {
         LabeledContent(title) {
             HStack {
                 Text(model.settings[keyPath: keyPath]).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
                 Button("Choose…") {
-                    if let path = Panels.chooseFolder(message: "", startingAt: model.settings[keyPath: keyPath]) {
+                    if let path = Panels.chooseFolder(message: message, startingAt: model.settings[keyPath: keyPath]) {
                         model.settingBinding(keyPath, [key]).wrappedValue = CorePaths.abbreviate(path)
                     }
                 }
@@ -50,6 +110,9 @@ private struct FolderSetting: View {
         }
     }
 }
+
+/// Units get a fixed width so fields and steppers line up across rows.
+private let unitWidth: CGFloat = 40
 
 /// Integer setting with a text field and stepper.
 private struct NumberSetting: View {
@@ -69,7 +132,7 @@ private struct NumberSetting: View {
                     .frame(width: 70)
                     .textFieldStyle(.roundedBorder)
                 Stepper("", value: $value, in: range, step: step).labelsHidden()
-                if !unit.isEmpty { Text(unit).foregroundStyle(.secondary) }
+                Text(unit).foregroundStyle(.secondary).frame(width: unitWidth, alignment: .leading)
             }
         }
     }
@@ -90,8 +153,10 @@ private struct GeneralSettings: View {
                 Toggle("Check daily for updates", isOn: model.settingBinding(\.updates.check, ["updates", "check"]))
             }
             Section("Folders") {
-                FolderSetting(title: "Base folder for Offline Items", keyPath: \.baseFolder, key: "baseFolder")
-                FolderSetting(title: "Folder for Mounts", keyPath: \.mountFolder, key: "mountFolder")
+                FolderSetting(title: "Base folder for Offline Items", keyPath: \.baseFolder, key: "baseFolder",
+                              message: String(localized: "Choose the base folder for new Offline Items. Existing Offline Items stay where they are."))
+                FolderSetting(title: "Folder for Mounts", keyPath: \.mountFolder, key: "mountFolder",
+                              message: String(localized: "Choose the folder in which new Mounts appear."))
             }
         }
         .formStyle(.grouped)
@@ -102,26 +167,29 @@ private struct GeneralSettings: View {
 
 private struct SyncSettings: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.isSnapshot) private var isSnapshot
     @State private var excludes = ""
 
     var body: some View {
         Form {
-            Section("Timing") {
+            Section("Intervals") {
                 NumberSetting(title: "Quiet period after local changes",
                               value: model.settingBinding(\.quietPeriodSeconds, ["quietPeriodSeconds"]),
                               range: 5...3600, unit: String(localized: "s"), step: 5)
-                NumberSetting(title: "Cloud change polling",
-                              value: model.settingBinding(\.pollIntervalSeconds, ["pollIntervalSeconds"]),
-                              range: 10...3600, unit: String(localized: "s"), step: 10)
-                NumberSetting(title: "Nextcloud check interval",
-                              value: model.settingBinding(\.nextcloudEtagSeconds, ["nextcloudEtagSeconds"]),
-                              range: 10...3600, unit: String(localized: "s"), step: 10)
-                NumberSetting(title: "Check interval for other providers",
-                              value: model.settingBinding(\.genericCheckSeconds, ["genericCheckSeconds"]),
-                              range: 60...86400, unit: String(localized: "s"), step: 60)
                 NumberSetting(title: "Full safety sync every",
                               value: model.settingBinding(\.safetyFullSyncMinutes, ["safetyFullSyncMinutes"]),
                               range: 5...1440, unit: String(localized: "min"), step: 5)
+            }
+            Section("Check the Cloud for Changes") {
+                NumberSetting(title: "Providers with change notifications (e.g. Google Drive, OneDrive)",
+                              value: model.settingBinding(\.pollIntervalSeconds, ["pollIntervalSeconds"]),
+                              range: 10...3600, unit: String(localized: "s"), step: 10)
+                NumberSetting(title: "Nextcloud",
+                              value: model.settingBinding(\.nextcloudEtagSeconds, ["nextcloudEtagSeconds"]),
+                              range: 10...3600, unit: String(localized: "s"), step: 10)
+                NumberSetting(title: "All other providers",
+                              value: model.settingBinding(\.genericCheckSeconds, ["genericCheckSeconds"]),
+                              range: 60...86400, unit: String(localized: "s"), step: 60)
             }
             Section("Pause Rules") {
                 Toggle("Studio Mode: pause while these apps run",
@@ -129,7 +197,7 @@ private struct SyncSettings: View {
                 StudioAppList()
                 Toggle("Pause on battery power or in Low Power Mode",
                        isOn: model.settingBinding(\.pauseRules.battery.enabled, ["pauseRules", "battery", "enabled"]))
-                Toggle("Pause on metered networks (personal hotspot)",
+                Toggle("Pause on a personal hotspot or in Low Data Mode",
                        isOn: model.settingBinding(\.pauseRules.meteredNetwork.enabled,
                                                   ["pauseRules", "meteredNetwork", "enabled"]))
                 Toggle("Pause while the CPU is busy",
@@ -141,11 +209,8 @@ private struct SyncSettings: View {
                     .disabled(!model.settings.pauseRules.cpu.enabled)
             }
             Section("Bandwidth") {
-                Toggle("Limit bandwidth", isOn: model.settingBinding(\.bandwidth.enabled, ["bandwidth", "enabled"]))
-                BandwidthSetting(title: "Upload", keyPath: \.bandwidth.uploadMiBps, key: "uploadMiBps", fallback: 5)
-                    .disabled(!model.settings.bandwidth.enabled)
-                BandwidthSetting(title: "Download", keyPath: \.bandwidth.downloadMiBps, key: "downloadMiBps", fallback: 20)
-                    .disabled(!model.settings.bandwidth.enabled)
+                BandwidthSetting(title: "Upload", side: \.uploadMiBps, fallback: 5)
+                BandwidthSetting(title: "Download", side: \.downloadMiBps, fallback: 20)
             }
             Section("Default Excludes") {
                 TextEditor(text: $excludes)
@@ -154,50 +219,58 @@ private struct SyncSettings: View {
                 HStack {
                     Text("One pattern per line. Applies to new Offline Items.").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Restore Defaults") { excludes = CoreSettings.defaultExcludes.joined(separator: "\n") }
-                    Button("Apply") {
-                        let patterns = excludes.split(whereSeparator: \.isNewline)
-                            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                        model.settingBinding(\.defaultExcludes, ["defaultExcludes"]).wrappedValue = patterns
+                    Button("Restore Defaults") {
+                        excludes = CoreSettings.defaultExcludes.joined(separator: "\n")
+                        applyExcludes()
                     }
-                    .disabled(excludesUnchanged)
+                    Button("Apply", action: applyExcludes)
+                        .disabled(excludesUnchanged)
                 }
             }
         }
         .formStyle(.grouped)
-        .frame(height: 560)
+        // Snapshots show the whole tab instead of a scroll view.
+        .frame(height: isSnapshot ? nil : 560)
         .onAppear { excludes = model.settings.defaultExcludes.joined(separator: "\n") }
+        // Tab switch or closing the window: keep edits instead of dropping them silently.
+        .onDisappear(perform: applyExcludes)
     }
 
-    private var excludesUnchanged: Bool {
-        excludes.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty } == model.settings.defaultExcludes
+    private var patterns: [String] {
+        excludes.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    private var excludesUnchanged: Bool { patterns == model.settings.defaultExcludes }
+
+    private func applyExcludes() {
+        guard !excludesUnchanged else { return }
+        model.settingBinding(\.defaultExcludes, ["defaultExcludes"]).wrappedValue = patterns
     }
 }
 
+/// One direction of the bandwidth limit. Both rows keep their layout: "Unlimited" only disables the field.
 private struct BandwidthSetting: View {
     @Environment(AppModel.self) private var model
     let title: LocalizedStringKey
-    let keyPath: WritableKeyPath<CoreSettings, Int>
-    let key: String
+    let side: WritableKeyPath<CoreSettings.Bandwidth, Int>
     let fallback: Int
 
     var body: some View {
-        let binding = model.settingBinding(keyPath, ["bandwidth", key])
+        let bandwidth = model.settingBinding(\.bandwidth, ["bandwidth"])
+        let limit = { bandwidth.wrappedValue.limit(side) }
+        let setLimit = { (value: Int) in bandwidth.wrappedValue = bandwidth.wrappedValue.settingLimit(side, to: value) }
         LabeledContent(title) {
             HStack {
-                Toggle("Unlimited", isOn: Binding(get: { binding.wrappedValue == 0 },
-                                                  set: { binding.wrappedValue = $0 ? 0 : fallback }))
+                Toggle("Unlimited", isOn: Binding(get: { limit() == 0 }, set: { setLimit($0 ? 0 : fallback) }))
                     .toggleStyle(.checkbox)
-                if binding.wrappedValue != 0 {
-                    TextField("", value: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = max(1, $0) }),
-                              format: .number)
-                        .labelsHidden()
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 60)
-                        .textFieldStyle(.roundedBorder)
-                    Text("MiB/s").foregroundStyle(.secondary)
-                }
+                TextField("", value: Binding(get: { limit() == 0 ? fallback : limit() }, set: { setLimit(max(1, $0)) }),
+                          format: .number)
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 60)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(limit() == 0)
+                Text("MiB/s").foregroundStyle(.secondary).frame(width: unitWidth, alignment: .leading)
             }
         }
     }
@@ -273,7 +346,7 @@ private struct MountSettings: View {
                 } else {
                     HStack {
                         Text("Not installed").foregroundStyle(.secondary)
-                        Link("Get FUSE-T", destination: URL(string: "https://github.com/macos-fuse-t/fuse-t/releases")!)
+                        Link("Get FUSE-T…", destination: URL(string: "https://github.com/macos-fuse-t/fuse-t/releases")!)
                     }
                 }
             }
@@ -291,22 +364,35 @@ private struct MountSettings: View {
 
 private struct NotificationSettings: View {
     @Environment(AppModel.self) private var model
+    @State private var denied = false
 
     var body: some View {
         Form {
-            Toggle("Errors", isOn: model.settingBinding(\.notifications.errors, ["notifications", "errors"]))
-            Toggle("Conflicts", isOn: model.settingBinding(\.notifications.conflicts, ["notifications", "conflicts"]))
-            Toggle("Mass-Delete Guard", isOn: model.settingBinding(\.notifications.massDelete,
-                                                                   ["notifications", "massDelete"]))
-            Toggle("Link copied", isOn: model.settingBinding(\.notifications.linkCopied, ["notifications", "linkCopied"]))
-            Button("Open Notification Settings…") {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
-                    NSWorkspace.shared.open(url)
-                }
+            if denied {
+                Label("Notifications are turned off in System Settings.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
             }
-            .buttonStyle(.link)
+            Section("Notify Me About") {
+                Toggle("Errors", isOn: model.settingBinding(\.notifications.errors, ["notifications", "errors"]))
+                Toggle("Conflicts (Conflict Copy created)",
+                       isOn: model.settingBinding(\.notifications.conflicts, ["notifications", "conflicts"]))
+                Toggle("Stopped syncs (Mass-Delete Guard)",
+                       isOn: model.settingBinding(\.notifications.massDelete, ["notifications", "massDelete"]))
+                Toggle("Copied links",
+                       isOn: model.settingBinding(\.notifications.linkCopied, ["notifications", "linkCopied"]))
+            }
+            Button("Open Notification Settings…") { NotificationManager.openSystemSettings() }
+                .buttonStyle(.link)
         }
         .formStyle(.grouped)
+        .task { await refreshAuthorization() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshAuthorization() }
+        }
+    }
+
+    private func refreshAuthorization() async {
+        denied = await NotificationManager.shared.authorizationStatus() == .denied
     }
 }
 
@@ -317,17 +403,17 @@ private struct LogSettings: View {
 
     var body: some View {
         Form {
-            Picker("Log level", selection: model.settingBinding(\.log.level, ["log", "level"])) {
-                ForEach(ActivityLevel.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
-            NumberSetting(title: "Keep entries for", value: model.settingBinding(\.log.retentionDays, ["log", "retentionDays"]),
-                          range: 1...365, unit: String(localized: "days"))
-            NumberSetting(title: "Maximum size", value: model.settingBinding(\.log.maxMB, ["log", "maxMB"]),
-                          range: 5...1024, unit: "MB", step: 5)
-            LabeledContent("Activity log") {
+            Section("Activity Log") {
+                Picker("Log level", selection: model.settingBinding(\.log.level, ["log", "level"])) {
+                    ForEach(ActivityLevel.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                NumberSetting(title: "Keep entries for", value: model.settingBinding(\.log.retentionDays, ["log", "retentionDays"]),
+                              range: 1...365, unit: String(localized: "days"))
+                NumberSetting(title: "Maximum size", value: model.settingBinding(\.log.maxMB, ["log", "maxMB"]),
+                              range: 5...1024, unit: "MB", step: 5)
                 Button("Export…") { exportActivityLog(model) }
             }
-            LabeledContent("Service log") {
+            Section("Service Log") {
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([CorePaths.logsDirectory])
                 }
@@ -370,11 +456,13 @@ private struct AboutSettings: View {
                 Link("Releases", destination: URL(string: "https://github.com/DonMikone/CloudWire/releases")!)
             }
             Section("Acknowledgements") {
-                Text("CloudWire is open source under the MIT license.")
-                Text("rclone – MIT license, © Nick Craig-Wood and contributors.")
-                Text("libfuse headers (FUSE-T) – LGPL-2.1.")
+                Group {
+                    Text("CloudWire is open source under the MIT license.")
+                    Text("rclone – MIT license, © Nick Craig-Wood and contributors.")
+                    Text("libfuse headers (FUSE-T) – LGPL-2.1.")
+                }
+                .font(.callout)
             }
-            .font(.callout)
         }
         .formStyle(.grouped)
     }

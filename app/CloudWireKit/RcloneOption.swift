@@ -26,10 +26,14 @@ public struct RcloneOption: Decodable, Sendable, Hashable, Identifiable {
 
     public var id: String { name }
 
-    /// First line of the help text, used as the field label.
+    /// First line of the help text without a closing full stop, used as the field label.
     public var title: String {
-        let first = help.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init)
-        return first ?? name
+        guard let first = help.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first else {
+            return name
+        }
+        let line = first.trimmingCharacters(in: .whitespaces)
+        guard line.hasSuffix("."), !line.hasSuffix("..") else { return line }
+        return String(line.dropLast())
     }
 
     /// Help text after the first line.

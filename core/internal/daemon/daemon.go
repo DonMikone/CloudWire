@@ -28,6 +28,7 @@ import (
 	"github.com/DonMikone/CloudWire/core/internal/connections"
 	"github.com/DonMikone/CloudWire/core/internal/keychain"
 	"github.com/DonMikone/CloudWire/core/internal/mounts"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/notify"
 	"github.com/DonMikone/CloudWire/core/internal/offline"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
@@ -215,7 +216,7 @@ func newCore(p paths.Paths, st *store.Store, configPass string) *Core {
 	}}
 	c.offline.Watch = true
 	c.shares = sharing.New(st, c.log, c.conns)
-	c.vaults = vault.NewService(st, c.log, srv, p)
+	c.vaults = vault.NewService(st, c.log, c.notify, srv, p)
 	c.vaults.Mounts = c.mounts
 	c.vaults.Offline = c.offline
 	c.offline.Vaults = c.vaults
@@ -253,7 +254,7 @@ func (c *Core) firstStart() {
 	}); err != nil {
 		slog.Error("first start settings", "err", err)
 	}
-	c.log.Info("core", "", fmt.Sprintf("First start: conflict label %q, %d Studio Mode app(s) detected", label, len(daws)), daws)
+	c.log.Info("core", "", msg.New("core.firstStart", "label", label, "count", len(daws)), daws)
 }
 
 func (c *Core) run() int {
@@ -266,7 +267,7 @@ func (c *Core) run() int {
 		return 1
 	}
 	slog.Info("CloudWire Core started", "version", buildinfo.Version, "pid", os.Getpid())
-	c.log.Info("core", "", "CloudWire Core "+buildinfo.Version+" started", nil)
+	c.log.Info("core", "", msg.New("core.started", "version", buildinfo.Version), nil)
 
 	c.mounts.StartAuto()
 	if err := c.offline.Start(); err != nil {
@@ -297,7 +298,7 @@ func (c *Core) stop() int {
 	c.srv.Close()
 	c.offline.Stop()
 	c.mounts.StopAll()
-	c.log.Info("core", "", "CloudWire Core stopped", nil)
+	c.log.Info("core", "", msg.New("core.stopped"), nil)
 	_ = c.st.Close()
 	_ = os.Remove(c.paths.Socket)
 	_ = os.Remove(c.paths.ActiveFile)
@@ -334,7 +335,11 @@ func (c *Core) watchSystem() {
 		known, satisfied = true, st.Satisfied
 		mu.Unlock()
 		if regained || changed {
-			c.log.Debug("core", "", fmt.Sprintf("Network changed (online: %v)", st.Satisfied), nil)
+			code := "core.networkOffline"
+			if st.Satisfied {
+				code = "core.networkOnline"
+			}
+			c.log.Debug("core", "", msg.New(code), nil)
 		}
 		if regained {
 			c.mounts.Retrigger()
@@ -342,10 +347,10 @@ func (c *Core) watchSystem() {
 		}
 	})
 	if err := platform.OnPowerEvents(func() {
-		c.log.Debug("core", "", "System will sleep", nil)
+		c.log.Debug("core", "", msg.New("core.sleeping"), nil)
 		c.offline.Sleep()
 	}, func() {
-		c.log.Debug("core", "", "System woke up", nil)
+		c.log.Debug("core", "", msg.New("core.woke"), nil)
 		c.mounts.Retrigger()
 		c.offline.Wake()
 	}); err != nil {

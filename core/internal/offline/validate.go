@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
@@ -65,24 +66,33 @@ type validation struct {
 	mergeInto *store.OfflineItem
 }
 
+// vaultFolderSuffix marks the folder of a Vault; its content is encrypted and
+// only usable through the unlocked Vault's own Connection.
+const vaultFolderSuffix = ".cwvault"
+
 // validateNew checks a new item against the existing ones and the system.
 func validateNew(nu store.OfflineItem, existing []store.OfflineItem, mountPoints []string, p paths.Paths) (validation, error) {
 	var v validation
+	for _, part := range strings.Split(nu.RemotePath, "/") {
+		if strings.HasSuffix(part, vaultFolderSuffix) {
+			return v, api.Fail("offline.vaultFolder", msg.New("offline.vaultFolder", "folder", part))
+		}
+	}
 	sp := nu.StoragePath
 	if !filepath.IsAbs(sp) {
 		return v, api.Invalid("storage location must be an absolute path")
 	}
 	if sp == "/" || sp == p.Home || paths.IsWithin(p.Home, sp) {
-		return v, api.Errorf("offline.overlap", "The storage location %s is too broad", sp)
+		return v, api.Fail("offline.overlap", msg.New("offline.storageTooBroad", "path", sp))
 	}
 	for _, protected := range []string{p.AppSupport, p.CacheDir, filepath.Join(p.Home, "Library")} {
 		if paths.IsWithin(sp, protected) || paths.IsWithin(protected, sp) {
-			return v, api.Errorf("offline.overlap", "The storage location %s is not allowed", sp)
+			return v, api.Fail("offline.overlap", msg.New("offline.storageNotAllowed", "path", sp))
 		}
 	}
 	for _, mp := range mountPoints {
 		if paths.IsWithin(sp, mp) || paths.IsWithin(mp, sp) {
-			return v, api.Errorf("offline.overlap", "The storage location %s overlaps the Mount at %s", sp, mp)
+			return v, api.Fail("offline.overlap", msg.New("offline.storageOverlapsMount", "path", sp, "mountPoint", mp))
 		}
 	}
 	for i := range existing {
@@ -93,11 +103,11 @@ func validateNew(nu store.OfflineItem, existing []store.OfflineItem, mountPoints
 			continue
 		}
 		if remoteOverlap(nu, ex) {
-			return v, api.Errorf("offline.overlap", "This overlaps the Offline Item %q (%s)", itemName(ex), ex.StoragePath).
+			return v, api.Fail("offline.overlap", msg.New("offline.overlapsItem", "name", ItemName(ex), "path", ex.StoragePath)).
 				WithData("itemId", ex.ID)
 		}
 		if paths.IsWithin(sp, ex.StoragePath) || paths.IsWithin(ex.StoragePath, sp) {
-			return v, api.Errorf("offline.overlap", "The storage location overlaps the Offline Item %q (%s)", itemName(ex), ex.StoragePath).
+			return v, api.Fail("offline.overlap", msg.New("offline.storageOverlapsItem", "name", ItemName(ex), "path", ex.StoragePath)).
 				WithData("itemId", ex.ID)
 		}
 	}

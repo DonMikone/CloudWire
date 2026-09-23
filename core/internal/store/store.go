@@ -60,6 +60,14 @@ CREATE TABLE notifications(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT 
   params TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);`,
 	// Migration 2: cascade deletes and RunFiles look up files by run.
 	`CREATE INDEX sync_run_files_run ON sync_run_files(run_id);`,
+	// Migration 3: the Mount folder default became "~/CloudWire/Mounts"; installs that already have
+	// Mounts keep the previous default so new Mounts appear next to the existing ones.
+	`INSERT OR IGNORE INTO settings(key, value) SELECT 'mountFolder', '"~/CloudWire/Laufwerke"'
+  WHERE EXISTS (SELECT 1 FROM mounts);`,
+	// Migration 4: Activity entries carry a message code and its params (package msg) so the App
+	// can translate them; entries written before keep only their English message.
+	`ALTER TABLE activity ADD COLUMN code TEXT;
+ALTER TABLE activity ADD COLUMN params TEXT;`,
 }
 
 // Open opens (and if needed creates and migrates) the database at path.

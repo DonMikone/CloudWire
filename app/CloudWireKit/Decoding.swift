@@ -93,12 +93,7 @@ extension KeyedDecodingContainer where Key == AnyKey {
 
     /// Decodes a `[String: String]` map, converting scalar values to strings.
     func stringMap(_ key: String) -> [String: String] {
-        guard let raw = optional(key, as: [String: JSONValue].self) else { return [:] }
-        var result: [String: String] = [:]
-        for (name, value) in raw where !value.isNull {
-            result[name] = value.displayString
-        }
-        return result
+        optional(key, as: JSONValue.self)?.stringMap ?? [:]
     }
 }
 
@@ -107,6 +102,15 @@ extension JSONValue {
     public func decode<T: Decodable>(_ type: T.Type = T.self) throws -> T {
         let data = try JSONEncoder.coreEncoder.encode(self)
         return try JSONDecoder.coreDecoder.decode(T.self, from: data)
+    }
+
+    /// An object as `[String: String]`, scalar values converted to strings; empty for other values.
+    var stringMap: [String: String] {
+        var result: [String: String] = [:]
+        for (name, value) in objectValue ?? [:] where !value.isNull {
+            result[name] = value.displayString
+        }
+        return result
     }
 }
 

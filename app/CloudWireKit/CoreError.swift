@@ -18,6 +18,14 @@ public struct CoreError: Error, Sendable, Hashable, LocalizedError, CustomString
     public var errorDescription: String? { message }
     public var description: String { "\(code): \(message)" }
 
+    /// The translatable detail sentence (`data.key` and `data.params`); nil when the error has none.
+    /// `code` stays the error category.
+    public var text: CoreText? {
+        guard let key = data?["key"]?.stringValue, !key.isEmpty else { return nil }
+        return CoreText(code: key, params: data?["params"]?.stringMap ?? [:],
+                        message: data?["message"]?.stringValue ?? message)
+    }
+
     /// Dependents listed by `connection.inUse`.
     public var dependents: [Dependent] {
         guard let items = data?["dependents"]?.arrayValue else { return [] }
@@ -49,15 +57,18 @@ public struct CoreError: Error, Sendable, Hashable, LocalizedError, CustomString
     public static let socketCode = "client.socket"
 
     public static func notConnected() -> CoreError {
-        CoreError(code: notConnectedCode, message: "Not connected to the CloudWire Core.")
+        CoreError(code: notConnectedCode, message: "Not connected to the CloudWire Core.",
+                  data: .object(["key": .string(notConnectedCode)]))
     }
 
     public static func disconnected() -> CoreError {
-        CoreError(code: disconnectedCode, message: "The connection to the CloudWire Core was lost.")
+        CoreError(code: disconnectedCode, message: "The connection to the CloudWire Core was lost.",
+                  data: .object(["key": .string(disconnectedCode)]))
     }
 
     public static func timeout(_ method: String) -> CoreError {
-        CoreError(code: timeoutCode, message: "The CloudWire Core did not answer \(method) in time.")
+        CoreError(code: timeoutCode, message: "The CloudWire Core did not answer \(method) in time.",
+                  data: .object(["key": .string(timeoutCode), "params": .object(["method": .string(method)])]))
     }
 
     /// True for errors that mean the Core is not reachable (as opposed to a failed operation).

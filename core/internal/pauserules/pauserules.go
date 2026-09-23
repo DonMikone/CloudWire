@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
@@ -32,10 +33,13 @@ type Probes interface {
 	CPUTicks() (busy, total uint64, err error)
 }
 
-// ActiveRule is a rule that currently pauses syncing.
+// ActiveRule is a rule that currently pauses syncing. Detail is the running
+// app, "battery"/"lowPowerMode", "expensive"/"constrained" or the CPU load;
+// the embedded text says the same in words (package msg).
 type ActiveRule struct {
 	ID     string `json:"id"`
 	Detail string `json:"detail"`
+	msg.Text
 }
 
 // Evaluator evaluates the Pause Rules.
@@ -109,29 +113,30 @@ func (e *Evaluator) Evaluate() []ActiveRule {
 	if pr.StudioMode.Enabled && len(pr.StudioMode.Apps) > 0 {
 		if exes, err := e.Probes.RunningExecutables(); err == nil {
 			if app := runningApp(pr.StudioMode.Apps, exes); app != "" {
-				out = append(out, ActiveRule{ID: RuleStudioMode, Detail: app})
+				out = append(out, ActiveRule{ID: RuleStudioMode, Detail: app, Text: msg.New("pause.studioMode", "app", app)})
 			}
 		}
 	}
 	if pr.Battery.Enabled {
 		if e.Probes.OnBattery() {
-			out = append(out, ActiveRule{ID: RuleBattery, Detail: "battery"})
+			out = append(out, ActiveRule{ID: RuleBattery, Detail: "battery", Text: msg.New("pause.battery")})
 		} else if e.Probes.LowPowerMode() {
-			out = append(out, ActiveRule{ID: RuleBattery, Detail: "lowPowerMode"})
+			out = append(out, ActiveRule{ID: RuleBattery, Detail: "lowPowerMode", Text: msg.New("pause.lowPowerMode")})
 		}
 	}
 	if pr.MeteredNetwork.Enabled {
 		if exp, con, known := e.Probes.Network(); known && (exp || con) {
-			d := "expensive"
+			r := ActiveRule{ID: RuleMeteredNetwork, Detail: "expensive", Text: msg.New("pause.expensiveNetwork")}
 			if con {
-				d = "constrained"
+				r.Detail, r.Text = "constrained", msg.New("pause.constrainedNetwork")
 			}
-			out = append(out, ActiveRule{ID: RuleMeteredNetwork, Detail: d})
+			out = append(out, r)
 		}
 	}
 	if pr.CPU.Enabled {
 		if avg, full := e.CPUAverage(); full && avg > float64(pr.CPU.ThresholdPercent) {
-			out = append(out, ActiveRule{ID: RuleCPU, Detail: fmt.Sprintf("%.0f%%", avg)})
+			percent := fmt.Sprintf("%.0f", avg)
+			out = append(out, ActiveRule{ID: RuleCPU, Detail: percent + "%", Text: msg.New("pause.cpu", "percent", percent)})
 		}
 	}
 	return out

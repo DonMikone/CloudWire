@@ -175,7 +175,12 @@ public struct ConfigStep: Decodable, Sendable, Hashable {
     public var state: String
     public var option: RcloneOption?
     public var error: String
+    public var errorCode: String
+    public var errorParams: [String: String]
     public var connection: Connection?
+
+    /// The translatable `error`.
+    public var errorText: CoreText { CoreText(code: errorCode, params: errorParams, message: error) }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -185,6 +190,8 @@ public struct ConfigStep: Decodable, Sendable, Hashable {
         state = c.string("state")
         option = c.optional("option")
         error = c.string("error")
+        errorCode = c.string("errorCode")
+        errorParams = c.stringMap("errorParams")
         connection = c.optional("connection")
     }
 }
@@ -240,8 +247,15 @@ public struct NextcloudLoginEvent: Decodable, Sendable, Hashable {
     public var status: String
     public var connectionId: String?
     public var error: String?
+    public var errorCode: String
+    public var errorParams: [String: String]
 
     public var succeeded: Bool { status == "ok" }
+
+    /// The translatable `error`; nil without one.
+    public var errorText: CoreText? {
+        error.map { CoreText(code: errorCode, params: errorParams, message: $0) }
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -249,6 +263,8 @@ public struct NextcloudLoginEvent: Decodable, Sendable, Hashable {
         status = c.string("status")
         connectionId = c.optionalString("connectionId")
         error = c.optionalString("error")
+        errorCode = c.string("errorCode")
+        errorParams = c.stringMap("errorParams")
     }
 }
 
@@ -261,6 +277,17 @@ public struct RcloneProvider: Decodable, Sendable, Hashable, Identifiable {
     public var options: [RcloneOption]
     public var hide: Bool
     public var id: String { name }
+
+    /// A short provider name for labels and default Connection names: the description without a
+    /// parenthetical remark ("Google Cloud Storage (this is not Google Drive)"), or the capitalised
+    /// type name when the description is missing or reads like a sentence ("s3" → "S3").
+    public var shortName: String {
+        var text = description
+        if let remark = text.range(of: " (") { text = String(text[..<remark.lowerBound]) }
+        text = text.trimmingCharacters(in: .whitespaces)
+        guard text.isEmpty || text.count > 30 else { return text }
+        return name.prefix(1).uppercased() + name.dropFirst()
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -318,9 +345,16 @@ public struct Mount: Decodable, Sendable, Hashable, Identifiable {
     public var options: [String: String]
     public var state: MountState
     public var error: String
+    public var errorCode: String
+    public var errorParams: [String: String]
     public var createdAt: Int64
+    /// When the Mount last came up (Unix ms); only set while mounted.
+    public var mountedAt: Int64?
 
     public var isMounted: Bool { state == .mounted }
+
+    /// The translatable `error`.
+    public var errorText: CoreText { CoreText(code: errorCode, params: errorParams, message: error) }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -336,7 +370,10 @@ public struct Mount: Decodable, Sendable, Hashable, Identifiable {
         options = c.stringMap("options")
         state = c.value("state", .unmounted)
         error = c.string("error")
+        errorCode = c.string("errorCode")
+        errorParams = c.stringMap("errorParams")
         createdAt = c.int64("createdAt")
+        mountedAt = c.optionalInt64("mountedAt")
     }
 }
 
@@ -391,12 +428,20 @@ public struct OfflineItem: Decodable, Sendable, Hashable, Identifiable {
     public var excludes: [String]
     public var advanced: [String: JSONValue]
     public var state: OfflineState
+    /// A pause reason id (`paused`) or rclone's error text (`error`).
     public var reason: String
+    public var reasonCode: String
+    public var reasonParams: [String: String]
     public var lastSyncAt: Int64?
     public var needsResync: Bool
     public var createdAt: Int64
     public var progress: SyncProgress?
     public var isVault: Bool
+    /// Why the Mass-Delete Guard stopped the item; only for `needsConfirmation`.
+    public var massDelete: MassDeleteInfo?
+
+    /// The translatable error of an item in the `error` state (`reason` with its code).
+    public var errorText: CoreText { CoreText(code: reasonCode, params: reasonParams, message: reason) }
 
     /// A short display name: the folder name, or the file names for `files` items.
     public var displayName: String {
@@ -419,11 +464,33 @@ public struct OfflineItem: Decodable, Sendable, Hashable, Identifiable {
         advanced = c.value("advanced", [String: JSONValue]())
         state = c.value("state", .pending)
         reason = c.string("reason")
+        reasonCode = c.string("reasonCode")
+        reasonParams = c.stringMap("reasonParams")
         lastSyncAt = c.optionalInt64("lastSyncAt")
         needsResync = c.bool("needsResync")
         createdAt = c.int64("createdAt")
         progress = c.optional("progress")
         isVault = c.bool("isVault")
+        massDelete = c.optional("massDelete")
+    }
+}
+
+/// Details of a Mass-Delete Guard stop.
+public struct MassDeleteInfo: Decodable, Sendable, Hashable {
+    /// tooManyDeletes | allChanged
+    public var reason: String
+    /// local | cloud: the side on which the files were deleted or changed.
+    public var side: String
+    /// Deleted files and files before the run (both 0 for allChanged).
+    public var deletes: Int
+    public var total: Int
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        reason = c.string("reason")
+        side = c.string("side")
+        deletes = c.int("deletes")
+        total = c.int("total")
     }
 }
 
@@ -511,11 +578,20 @@ public struct StatusForPathsResult: Decodable, Sendable {
 public struct ActiveRule: Decodable, Sendable, Hashable, Identifiable {
     public var id: String
     public var detail: String
+    public var code: String
+    public var params: [String: String]
+    public var message: String
+
+    /// What holds syncing, in words; a Core without codes only sends `detail`.
+    public var text: CoreText { CoreText(code: code, params: params, message: message.isEmpty ? detail : message) }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         id = c.string("id")
         detail = c.string("detail")
+        code = c.string("code")
+        params = c.stringMap("params")
+        message = c.string("message")
     }
 }
 
@@ -609,6 +685,8 @@ public struct ShareCapabilities: Decodable, Sendable, Hashable {
     public var emailShare: Bool
     public var webURL: Bool
     public var manage: Bool
+    /// Public links can expire (Nextcloud and the rclone backends that honour an expiry).
+    public var linkExpiry: Bool
     public var reason: String?
 
     public static let none = ShareCapabilities()
@@ -616,7 +694,8 @@ public struct ShareCapabilities: Decodable, Sendable, Hashable {
     public var anySharing: Bool { publicLink || userShare || emailShare || internalLink }
 
     public init(publicLink: Bool = false, internalLink: Bool = false, userShare: Bool = false,
-                emailShare: Bool = false, webURL: Bool = false, manage: Bool = false, reason: String? = nil)
+                emailShare: Bool = false, webURL: Bool = false, manage: Bool = false, linkExpiry: Bool = false,
+                reason: String? = nil)
     {
         self.publicLink = publicLink
         self.internalLink = internalLink
@@ -624,6 +703,7 @@ public struct ShareCapabilities: Decodable, Sendable, Hashable {
         self.emailShare = emailShare
         self.webURL = webURL
         self.manage = manage
+        self.linkExpiry = linkExpiry
         self.reason = reason
     }
 
@@ -635,7 +715,19 @@ public struct ShareCapabilities: Decodable, Sendable, Hashable {
         emailShare = c.bool("emailShare")
         webURL = c.bool("webURL")
         manage = c.bool("manage")
+        linkExpiry = c.bool("linkExpiry")
         reason = c.optionalString("reason")
+    }
+}
+
+/// `shares.delete` result.
+public struct ShareDeleteResult: Decodable, Sendable, Hashable {
+    /// Removed from CloudWire only: the provider still serves the link (rclone backends without unlink).
+    public var remoteStillActive: Bool
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        remoteStillActive = c.bool("remoteStillActive")
     }
 }
 
@@ -715,21 +807,48 @@ public struct EncryptExistingResult: Decodable, Sendable, Hashable {
     }
 }
 
-public struct VaultMigrationEvent: Decodable, Sendable, Hashable {
+public struct VaultMigrationEvent: Decodable, Sendable, Hashable, Identifiable {
     public var jobId: String
     public var vaultId: String
-    /// queued | running | verified | mismatch | error | deleted
+    /// Source Connection and the source path relative to it.
+    public var connectionId: String
+    public var path: String
+    public var isDir: Bool
+    /// queued | running | verified | mismatch | error | deleted | canceled
     public var status: String
     public var mismatches: [String]
     public var error: String?
+    /// Latest copy progress; 0 until the worker reported it.
+    public var bytes: Int64
+    public var totalBytes: Int64
+    public var transfers: Int64
+    public var createdAt: Int64
+
+    public var id: String { jobId }
+
+    /// The job is waiting or copying and can still be canceled.
+    public var isActive: Bool { status == "queued" || status == "running" }
+
+    /// Completed fraction in 0...1, or nil when the total is unknown.
+    public var fraction: Double? {
+        guard totalBytes > 0 else { return nil }
+        return min(1, max(0, Double(bytes) / Double(totalBytes)))
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         jobId = c.string("jobId")
         vaultId = c.string("vaultId")
+        connectionId = c.string("connectionId")
+        path = c.string("path")
+        isDir = c.bool("isDir")
         status = c.string("status")
         mismatches = c.value("mismatches", [String]())
         error = c.optionalString("error")
+        bytes = c.int64("bytes")
+        totalBytes = c.int64("totalBytes")
+        transfers = c.int64("transfers")
+        createdAt = c.int64("createdAt")
     }
 }
 
@@ -812,13 +931,36 @@ public struct ActivityEntry: Decodable, Sendable, Hashable, Identifiable {
     public var level: ActivityLevel
     public var category: ActivityCategory
     public var subjectId: String
+    /// English text; entries written before message codes existed only have this.
     public var message: String
+    public var code: String
+    public var params: [String: String]
     public var details: JSONValue?
+
+    /// The translatable text of the entry.
+    public var text: CoreText { CoreText(code: code, params: params, message: message) }
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(ts) / 1000) }
 
     /// The sync run this entry summarises, when the Core attached one.
     public var runId: Int64? { details?["runId"]?.int64Value }
+
+    /// Whether the element this problem is about is healthy again since the problem was logged: a
+    /// Mount that came up afterwards, an Offline Item that synced without errors afterwards, or an
+    /// element that no longer exists. Problems of other categories stay until dismissed.
+    public func isResolved(mounts: [Mount], offlineItems: [OfflineItem]) -> Bool {
+        guard !subjectId.isEmpty else { return false }
+        switch category {
+        case .mount:
+            guard let mount = mounts.first(where: { $0.id == subjectId }) else { return true }
+            return mount.state == .mounted && (mount.mountedAt ?? .min) > ts
+        case .offline, .sync:
+            guard let item = offlineItems.first(where: { $0.id == subjectId }) else { return true }
+            return item.state == .idle && (item.lastSyncAt ?? .min) > ts
+        default:
+            return false
+        }
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -828,6 +970,8 @@ public struct ActivityEntry: Decodable, Sendable, Hashable, Identifiable {
         category = c.value("category", .core)
         subjectId = c.string("subjectId")
         message = c.string("message")
+        code = c.string("code")
+        params = c.stringMap("params")
         let raw = c.optional("details", as: JSONValue.self)
         details = (raw?.isNull ?? true) ? nil : raw
     }
@@ -845,6 +989,11 @@ public struct CoreNotification: Decodable, Sendable, Hashable, Identifiable {
     public var itemId: String { params["itemId"]?.stringValue ?? "" }
     public var itemName: String { params["itemName"]?.stringValue ?? "" }
     public var files: [String] { params["files"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
+
+    /// The translatable body of an `error` notification (`message` with `code` and `params`).
+    public var text: CoreText {
+        CoreText(code: params["code"]?.stringValue, params: params["params"]?.stringMap ?? [:], message: message)
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)

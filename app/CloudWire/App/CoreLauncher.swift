@@ -237,7 +237,7 @@ enum CoreLauncher {
                 delay = min(delay * 2, .seconds(1))
             }
         }
-        throw CoreLauncherError.unreachable(lastError.localizedDescription)
+        throw CoreLauncherError.unreachable(ErrorText.alert(for: lastError).message)
     }
 
     private static func checkVersion(_ info: CoreInfo, client: CoreClient) async throws -> CoreInfo {

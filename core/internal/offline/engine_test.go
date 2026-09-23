@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -63,6 +64,7 @@ func (f *fakeProbes) CPUTicks() (uint64, uint64, error) { return 0, 0, nil }
 
 type fakeJob struct {
 	job     sv.Job
+	h       sv.Handlers
 	done    chan struct{}
 	mu      sync.Mutex
 	out     sv.Msg
@@ -126,8 +128,8 @@ func newHarness(t *testing.T) *harness {
 	e.Vaults = fakeVaults{"vault-conn": true}
 	e.Eval = &pauserules.Evaluator{Probes: h.probes, Settings: func() store.Settings { s, _ := st.Settings(); return s }}
 	e.Now = func() time.Time { return h.now }
-	e.Run = func(job sv.Job, _ sv.Handlers) (Job, error) {
-		j := &fakeJob{job: job, done: make(chan struct{})}
+	e.Run = func(job sv.Job, hs sv.Handlers) (Job, error) {
+		j := &fakeJob{job: job, h: hs, done: make(chan struct{})}
 		h.mu.Lock()
 		h.jobs = append(h.jobs, j)
 		h.mu.Unlock()
@@ -301,10 +303,16 @@ func TestMassDeleteConfirmFlow(t *testing.T) {
 	h.addItem("a")
 	h.e.rt["a"].due = h.now
 	h.step()
+	// rclone logs the abort reason before the job fails.
+	h.started()[0].h.OnLog(sv.LogLine{Level: "error", Object: "Safety abort",
+		Msg: `too many deletes (>50%, 5 of 9) on Path2 "cw-c1:a/". Run with --force if desired.`})
 	h.started()[0].complete(sv.StatusMassDelete, "too many deletes")
 	h.waitIdle()
-	if it := h.state("a"); it.State != StateNeedsConfirmation {
-		t.Fatalf("state %s", it.State)
+	if it := h.state("a"); it.State != StateNeedsConfirmation || !strings.HasPrefix(it.LastError, "Safety abort: too many deletes (>50%, 5 of 9) on Path2") {
+		t.Fatalf("item after Mass-Delete Guard stop: %+v", it)
+	}
+	if md := massDeleteOf(t, h.e, "a"); md == nil || *md != (MassDeleteInfo{Reason: "tooManyDeletes", Side: "cloud", Deletes: 5, Total: 9}) {
+		t.Fatalf("massDelete %+v", md)
 	}
 	if len(h.notify.kinds) != 1 || h.notify.kinds[0] != "massDelete" {
 		t.Fatalf("notifications %v", h.notify.kinds)
@@ -327,6 +335,10 @@ func TestMassDeleteConfirmFlow(t *testing.T) {
 	}
 	jobs[1].complete(sv.StatusMassDelete, "too many deletes")
 	h.waitIdle()
+	// Without a logged reason the worker's error is kept; no details then.
+	if it := h.state("a"); it.LastError != "too many deletes" || massDeleteOf(t, h.e, "a") != nil {
+		t.Fatalf("fallback reason: %+v", it)
+	}
 	if _, err := h.e.ConfirmMassDelete(context.Background(), "a", "restore"); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +348,115 @@ func TestMassDeleteConfirmFlow(t *testing.T) {
 	_ = json.Unmarshal(jobs[2].job.Bisync, &params)
 	if params["force"] != nil || params["resync"] != true || params["resyncMode"] != "newer" {
 		t.Fatalf("restore must resync (newer) without force: %v", params)
+	}
+}
+
+func massDeleteOf(t *testing.T, e *Engine, id string) *MassDeleteInfo {
+	t.Helper()
+	items, err := e.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range items {
+		if d.ID == id {
+			return d.MassDelete
+		}
+	}
+	t.Fatalf("item %s not listed", id)
+	return nil
+}
+
+// migrationHarness queues a migration whose callbacks report to channels.
+func migrationHarness(t *testing.T, h *harness, jobID string) (results chan sv.Msg, progress chan sv.Msg) {
+	t.Helper()
+	results, progress = make(chan sv.Msg, 4), make(chan sv.Msg, 4)
+	h.e.EnqueueMigration(&MigrationRequest{JobID: jobID, VaultID: "v1", Job: sv.MigrateJob{SrcFs: "cw-c1:", SrcPath: "Docs"},
+		OnResult:   func(m sv.Msg) { results <- m },
+		OnProgress: func(m sv.Msg) { progress <- m },
+	})
+	return results, progress
+}
+
+func noResult(t *testing.T, results chan sv.Msg) {
+	t.Helper()
+	select {
+	case m := <-results:
+		t.Fatalf("OnResult called for a canceled job: %+v", m)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestCancelQueuedMigration(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	h.e.rt["a"].due = h.now
+	h.step()
+	results, _ := migrationHarness(t, h, "m1")
+	if !h.e.CancelMigration("m1") {
+		t.Fatal("queued migration not found")
+	}
+	if h.e.CancelMigration("m1") {
+		t.Fatal("a canceled migration must not be cancelable again")
+	}
+	h.started()[0].complete(sv.StatusOK, "")
+	h.waitIdle()
+	h.step()
+	if jobs := h.started(); len(jobs) != 1 {
+		t.Fatalf("canceled migration started: %d jobs", len(jobs))
+	}
+	noResult(t, results)
+}
+
+func TestCancelRunningMigration(t *testing.T) {
+	h := newHarness(t)
+	results, progress := migrationHarness(t, h, "m1")
+	h.step()
+	jobs := h.started()
+	if len(jobs) != 1 || jobs[0].job.Type != sv.JobVaultMigrate {
+		t.Fatalf("migration not started: %+v", jobs)
+	}
+	jobs[0].h.OnMsg(sv.Msg{Type: "progress", Bytes: 10, TotalBytes: 40, Transfers: 1})
+	if p := <-progress; p.Bytes != 10 || p.TotalBytes != 40 || p.Transfers != 1 {
+		t.Fatalf("progress %+v", p)
+	}
+	// A Pause Rule stop underway would re-queue the job; the cancel wins.
+	h.probes.setBattery(true)
+	h.now = h.now.Add(10 * time.Second)
+	h.step()
+	if !h.e.CancelMigration("m1") {
+		t.Fatal("running migration not found")
+	}
+	h.waitIdle()
+	jobs[0].mu.Lock()
+	stopped := jobs[0].stopped
+	jobs[0].mu.Unlock()
+	if !stopped {
+		t.Fatal("running migration not stopped")
+	}
+	h.probes.setBattery(false)
+	h.now = h.now.Add(time.Minute)
+	h.step()
+	if n := len(h.started()); n != 1 {
+		t.Fatalf("canceled migration re-queued: %d jobs", n)
+	}
+	noResult(t, results)
+}
+
+func TestCancelRunningMigrationWithoutPause(t *testing.T) {
+	h := newHarness(t)
+	results, _ := migrationHarness(t, h, "m1")
+	h.step()
+	if !h.e.CancelMigration("m1") {
+		t.Fatal("running migration not found")
+	}
+	h.waitIdle()
+	h.step()
+	if n := len(h.started()); n != 1 {
+		t.Fatalf("canceled migration re-queued: %d jobs", n)
+	}
+	noResult(t, results)
+	if h.e.CancelMigration("m1") {
+		t.Fatal("a finished migration must not be cancelable")
 	}
 }
 
@@ -452,5 +573,32 @@ func TestNoRunsWhileRelocatingOrRemoving(t *testing.T) {
 	h.step()
 	if len(h.started()) != 1 {
 		t.Fatal("item must run again after the move finished")
+	}
+}
+
+func TestErrorReason(t *testing.T) {
+	const missing = `error reading source root directory: Directory Not Found`
+	for _, c := range []struct {
+		state, reason, code string
+	}{
+		{StateError, missing, "offline.cloudFolderMissing"},
+		{StateError, "couldn't connect: 503 Service Unavailable", "offline.syncFailed"},
+		{StateError, "", ""},
+		{StatePaused, pauserules.RuleBattery, ""},
+		{StatePaused, ReasonLocationMissing, ""},
+		{StateNeedsConfirmation, "too many deletes", ""},
+	} {
+		got := errorReason(store.OfflineItem{State: c.state, LastError: c.reason})
+		if got.Code != c.code {
+			t.Errorf("%s %q: code %q, want %q", c.state, c.reason, got.Code, c.code)
+		}
+		// The raw reason is never translated: it travels as the detail.
+		want := ""
+		if c.code != "" {
+			want = c.reason
+		}
+		if got.Detail() != want {
+			t.Errorf("%s %q: detail %q, want %q", c.state, c.reason, got.Detail(), want)
+		}
 	}
 }

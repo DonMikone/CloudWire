@@ -116,6 +116,8 @@ targets:
     platform: macOS
     sources:
       - path: CloudWireKitTests
+      # CoreText translates through the App's catalog; the tests read its compiled de/en strings.
+      - path: CloudWire/Localizable.xcstrings
     dependencies:
       - target: CloudWireKit
     settings:

@@ -55,7 +55,8 @@ struct ShareTarget: Codable, Hashable {
 struct OfflineDraft: Identifiable, Hashable {
     let id = UUID()
     var connectionId: String
-    var remotePath: String
+    /// What to preselect: a folder ("" = Connection root) or the files' folder; nil selects nothing.
+    var remotePath: String?
     var kind: OfflineKind
     var files: [String]
 }
@@ -66,6 +67,7 @@ struct EncryptDraft: Identifiable, Hashable {
     var connectionId: String
     var path: String
     var isDir: Bool
+    var vaultId: String? = nil
 }
 
 /// Overall state shown by the menu bar icon.
@@ -107,6 +109,9 @@ final class AppModel {
     var offlineDraft: OfflineDraft?
     var encryptDraft: EncryptDraft?
     var offlineRemoval: OfflineItem?
+    /// A locked Vault whose unlock sheet the Vaults section should show (VaultsView resets it).
+    var vaultUnlockRequest: Vault?
+    @ObservationIgnored private var askedForVaultUnlock = false
     var showAddConnection = false
     var alert: AlertContent?
 
@@ -200,8 +205,11 @@ final class AppModel {
 
     private func connectLoop() async {
         var delay: Duration = .seconds(1)
+        var firstAttempt = true
         while !Task.isCancelled && !stopping {
-            if coreState != .connected { coreState = .starting }
+            // Automatic retries keep `.failed` so the failure view does not flicker on every backoff step.
+            if firstAttempt && coreState != .connected { coreState = .starting }
+            firstAttempt = false
             do {
                 let info = try await CoreLauncher.ensureRunning(client: client)
                 coreInfo = info
@@ -215,6 +223,11 @@ final class AppModel {
                 // Hand over before the next suspension: from here on `.connectionLost` starts a new loop.
                 releaseStartTask()
                 await refreshAll()
+                if let autostart = pendingAutostart {
+                    pendingAutostart = nil
+                    setAutostart(autostart)
+                }
+                requestVaultUnlockIfNeeded()
                 await deliverPendingNotifications()
                 return
             } catch CoreLauncherError.requiresApproval {
@@ -223,7 +236,7 @@ final class AppModel {
                 releaseStartTask()
                 return
             } catch {
-                coreState = .failed(error.localizedDescription)
+                coreState = .failed(ErrorText.alert(for: error).message)
                 releaseConnectWaiters()
                 try? await Task.sleep(for: delay)
                 delay = min(delay * 2, .seconds(30))
@@ -338,12 +351,14 @@ final class AppModel {
         async let updateResult = try? client.updateStatus()
         async let fuseResult = try? client.fuseStatus()
         async let problemsResult = try? client.activity(.init(levels: [.error, .warn], limit: 8))
+        async let migrationsResult = try? client.vaultMigrations()
 
         if let value = await settingsResult { apply(value) }
         if let value = await connectionsResult { connections = value }
         if let value = await mountsResult { mounts = value }
         if let value = await offlineResult { offlineItems = value }
         if let value = await vaultsResult { vaults = value }
+        if let value = await migrationsResult { setMigrations(value) }
         pause = await pauseResult
         updateStatus = await updateResult
         if let value = await fuseResult { fuseStatus = value }
@@ -358,9 +373,15 @@ final class AppModel {
     func refreshVaults() async {
         guard !isDemo else { return }
         if let value = try? await client.vaults() { vaults = value }
+        if let value = try? await client.vaultMigrations() { setMigrations(value) }
         await refreshConnections()
         if let value = try? await client.offlineItems() { offlineItems = value }
         if let value = try? await client.mounts() { mounts = value }
+    }
+
+    /// Encryption jobs by id; the Core lists them newest first.
+    private func setMigrations(_ list: [VaultMigrationEvent]) {
+        migrations = Dictionary(list.map { ($0.jobId, $0) }, uniquingKeysWith: { newest, _ in newest })
     }
 
     func refreshMounts() async {
@@ -384,12 +405,28 @@ final class AppModel {
 
     // MARK: Settings
 
-    /// Sends a merge patch; the model updates from the reply.
-    func updateSettings(_ patch: JSONValue) {
+    /// Autostart chosen in onboarding while the Core was not reachable; sent once it connects.
+    private var pendingAutostart: Bool?
+
+    func setAutostart(_ enabled: Bool) {
+        guard isConnected else {
+            pendingAutostart = enabled
+            return
+        }
+        updateSettings(JSONValue.patch(["autostart"], .bool(enabled)))
+    }
+
+    /// Sends a merge patch; the model updates from the reply. On failure it shows what the Core
+    /// actually stored, falling back to `revert` when the Core cannot be asked.
+    func updateSettings(_ patch: JSONValue, revert: (@MainActor () -> Void)? = nil) {
         guard !isDemo else { return }
         perform {
-            let updated = try await self.client.updateSettings(patch)
-            self.apply(updated)
+            do {
+                self.apply(try await self.client.updateSettings(patch))
+            } catch {
+                if let stored = try? await self.client.settings() { self.apply(stored) } else { revert?() }
+                throw error
+            }
         }
     }
 
@@ -400,9 +437,13 @@ final class AppModel {
         Binding(
             get: { self.settings[keyPath: keyPath] },
             set: { newValue in
-                guard self.settings[keyPath: keyPath] != newValue else { return }
+                let oldValue = self.settings[keyPath: keyPath]
+                guard oldValue != newValue else { return }
                 self.settings[keyPath: keyPath] = newValue
-                self.updateSettings(JSONValue.patch(path, newValue.jsonValue))
+                self.updateSettings(JSONValue.patch(path, newValue.jsonValue)) {
+                    // Only undo our own change, not a newer one made meanwhile.
+                    if self.settings[keyPath: keyPath] == newValue { self.settings[keyPath: keyPath] = oldValue }
+                }
             })
     }
 
@@ -429,37 +470,26 @@ final class AppModel {
         return info
     }
 
-    // MARK: Data sources (demo-aware)
+    // MARK: Data sources
 
     func loadShares(connectionId: String, path: String?) async throws -> [Share] {
-        #if DEBUG
-        if isDemo { return DemoData.shares.filter { path == nil || $0.path == path } }
-        #endif
-        return try await client.shares(connectionId: connectionId, path: path)
+        try await client.shares(connectionId: connectionId, path: path)
     }
 
     func loadCapabilities(connectionId: String) async throws -> ShareCapabilities {
-        #if DEBUG
-        if isDemo { return DemoData.capabilities }
-        #endif
-        return try await client.shareCapabilities(connectionId: connectionId)
+        try await client.shareCapabilities(connectionId: connectionId)
     }
 
     func loadPolicy(connectionId: String) async throws -> SharePolicy {
-        if isDemo { return SharePolicy() }
-        return try await client.sharePolicy(connectionId: connectionId)
+        try await client.sharePolicy(connectionId: connectionId)
     }
 
     func loadActivity(_ filter: CoreClient.ActivityFilter) async throws -> [ActivityEntry] {
-        #if DEBUG
-        if isDemo { return DemoData.activity }
-        #endif
-        return try await client.activity(filter)
+        try await client.activity(filter)
     }
 
     func browse(connectionId: String, path: String) async throws -> [BrowseEntry] {
-        if isDemo { return [] }
-        return try await client.browse(connectionId: connectionId, path: path)
+        try await client.browse(connectionId: connectionId, path: path)
     }
 
     // MARK: Actions
@@ -476,8 +506,15 @@ final class AppModel {
         }
     }
 
+    /// Shows the error in the window the user last worked in; errors from the menu bar panel (or
+    /// with no window open) get an app-modal alert, so they do not wait unseen for the next window.
     func present(_ error: any Error, title: String? = nil) {
-        alert = ErrorText.alert(for: error, title: title)
+        let content = ErrorText.alert(for: error, title: title)
+        if WindowRouter.shared.lastKeyWindowShowsModelAlert {
+            alert = content
+        } else {
+            WindowRouter.shared.showModalAlert(content)
+        }
     }
 
     func setMounted(_ mount: Mount, _ mounted: Bool) {
@@ -545,19 +582,41 @@ final class AppModel {
         try? await client.acknowledgeNotifications(pending.map(\.id))
     }
 
+    /// Once per App launch: the first locked Vault that asks for its password and holds Mounts or
+    /// Offline Items gets a notification and its unlock sheet in the Vaults section.
+    private func requestVaultUnlockIfNeeded() {
+        guard !isDemo, !askedForVaultUnlock else { return }
+        askedForVaultUnlock = true
+        let locked = vaults.first { vault in
+            !vault.unlocked && vault.unlockMode == .ask
+                && (mounts.contains { $0.connectionId == vault.vaultConnectionId }
+                    || offlineItems.contains { $0.connectionId == vault.vaultConnectionId })
+        }
+        guard let locked else { return }
+        NotificationManager.shared.postVaultLocked(locked)
+        vaultUnlockRequest = locked
+        WindowRouter.shared.showMain(section: .vaults)
+    }
+
     // MARK: Demo
 
     #if DEBUG
+    /// Static demo state for `--export-snapshots` (views load the rest from the demo Core attached to
+    /// `client`). Calling it again restores the demo state.
     func loadDemoData() {
         isDemo = true
         coreState = .connected
         coreInfo = DemoData.coreInfo
+        settings = DemoData.settings
         connections = DemoData.connections
         mounts = DemoData.mounts
         offlineItems = DemoData.offlineItems
         vaults = DemoData.vaults
         pause = DemoData.pause
         recentProblems = DemoData.activity.filter { $0.level == .error || $0.level == .warn }
+        updateStatus = nil
+        fuseStatus = DemoData.fuseStatus
+        migrations = [:]
         hasSettings = true
     }
     #endif
