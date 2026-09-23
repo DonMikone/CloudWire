@@ -63,11 +63,7 @@ public actor CoreClient {
         io.setLimit(lowWater: 1)
         io.read(offset: 0, length: Int.max, queue: queue) { done, data, error in
             if let data, !data.isEmpty {
-                var bytes = Data(count: data.count)
-                bytes.withUnsafeMutableBytes { buffer in
-                    data.copyBytes(to: buffer, count: data.count)
-                }
-                chunkContinuation.yield(.data(bytes))
+                chunkContinuation.yield(.data(Data(data)))
             }
             if done {
                 chunkContinuation.yield(.closed(error))
