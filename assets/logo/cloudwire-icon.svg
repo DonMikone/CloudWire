@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>CloudWire</title>
+  <defs>
+    <linearGradient id="cw-body" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3A3D42"/>
+      <stop offset="1" stop-color="#1C1D20"/>
+    </linearGradient>
+    <linearGradient id="cw-line" x1="200" y1="220" x2="820" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF6A13"/>
+      <stop offset="1" stop-color="#FF8A2B"/>
+    </linearGradient>
+    <!-- plug gradients live in the plug's rotated local space -->
+    <linearGradient id="cw-handle" x1="0" y1="-46" x2="0" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF8A2B"/>
+      <stop offset="1" stop-color="#FF6A13"/>
+    </linearGradient>
+    <linearGradient id="cw-sleeve" x1="0" y1="-28" x2="0" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB27A"/>
+      <stop offset="0.45" stop-color="#FF8A2B"/>
+      <stop offset="1" stop-color="#FF6A13"/>
+    </linearGradient>
+    <filter id="cw-shadow" x="-10%" y="-10%" width="120%" height="125%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10"/>
+      <feOffset dy="10" result="blur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="cw-glow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <clipPath id="cw-clip">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+  </defs>
+  <g>
+    <!-- icon body: macOS grid 824x824 at (100,100), r=185 -->
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#cw-body)" filter="url(#cw-shadow)"/>
+    <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+    <g clip-path="url(#cw-clip)">
+      <!-- soft signal glow -->
+      <g opacity="0.35" filter="url(#cw-glow)">
+        <path d="M3.7 656.8 A200 200 0 0 0 126.9 614.4 A200 200 0 0 1 250 572 H590 A108 108 0 1 0 574.5 357.1 A140 140 0 0 0 300.8 380.6 A96 96 0 1 0 290 572 H590 A120 120 0 0 1 693.9 632" fill="none" stroke="#FF6A13" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+        <g transform="translate(693.9 632) rotate(60)">
+        <path d="M-2 -32 C12 -32 16 -46 32 -46 H90 Q102 -46 102 -34 V34 Q102 46 90 46 H32 C16 46 12 32 -2 32 Z" fill="#FF6A13"/>
+        <rect x="100" y="-28" width="120" height="56" fill="#FF6A13"/>
+        <rect x="146" y="-28" width="12" height="56" fill="#FF6A13"/>
+        <rect x="182" y="-28" width="12" height="56" fill="#FF6A13"/>
+        <path d="M218 -28 H222 C242 -28 254 -15 254 0 C254 15 242 28 222 28 H218 Z" fill="#FF6A13"/>
+        </g>
+      </g>
+      <!-- one continuous cable: enters bottom-left, traces the cloud, exits bottom-right -->
+      <path d="M3.7 656.8 A200 200 0 0 0 126.9 614.4 A200 200 0 0 1 250 572 H590 A108 108 0 1 0 574.5 357.1 A140 140 0 0 0 300.8 380.6 A96 96 0 1 0 290 572 H590 A120 120 0 0 1 693.9 632" fill="none" stroke="url(#cw-line)" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- 6.3 mm jack plug: moulded handle, 120x56 sleeve, two ring bands, tip -->
+      <g transform="translate(693.9 632) rotate(60)">
+        <path d="M-2 -32 C12 -32 16 -46 32 -46 H90 Q102 -46 102 -34 V34 Q102 46 90 46 H32 C16 46 12 32 -2 32 Z" fill="url(#cw-handle)"/>
+        <rect x="100" y="-28" width="120" height="56" fill="url(#cw-sleeve)"/>
+        <rect x="146" y="-28" width="12" height="56" fill="#FFB27A"/>
+        <rect x="182" y="-28" width="12" height="56" fill="#FFB27A"/>
+        <path d="M218 -28 H222 C242 -28 254 -15 254 0 C254 15 242 28 222 28 H218 Z" fill="url(#cw-sleeve)"/>
+      </g>
+    </g>
+  </g>
+</svg>

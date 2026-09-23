@@ -1,0 +1,31 @@
+CloudWire {{VERSION}} for macOS 14 Sonoma and later (Universal: Apple silicon and Intel).
+
+## Highlights
+
+- **Mounts**: attach any rclone-supported cloud as a Finder drive. Uses the built-in macOS NFS client by default, with optional FUSE (FUSE-T or macFUSE) per Mount.
+- **Offline Items**: keep cloud folders or single files as real local files on your SSD or an external drive, synced both ways in the background at the lowest system priority.
+- **Pause Rules**: syncing pauses automatically while your DAW or video editor runs, on battery, on metered networks, or under high CPU load. Bandwidth limits included.
+- **Sharing from Finder**: public links with password and expiry, internal links, user, group and email shares for Nextcloud and ownCloud; public links for other providers.
+- **Vaults**: client-side encrypted folders based on rclone crypt, with a password and a one-time Recovery Key.
+- **Activity Log**: every sync run, conflict and error, searchable and exportable as JSON or CSV.
+
+## Install
+
+1. Download `CloudWire-{{VERSION}}.dmg`, open it and drag **CloudWire** into **Applications**.
+2. Open CloudWire from Applications. This build is ad-hoc signed, so macOS may refuse to open it the first time:
+   - **macOS 15 Sequoia and macOS 26 Tahoe**: open **System Settings > Privacy & Security**, scroll to the message about CloudWire and click **Open Anyway**, then confirm.
+   - **macOS 14 Sonoma**: right-click (or Control-click) CloudWire in Applications, choose **Open**, then click **Open** in the dialog.
+3. During onboarding, allow the CloudWire background item when macOS asks. You can also turn it on later under **System Settings > General > Login Items & Extensions** (macOS 15 and later) or **System Settings > General > Login Items** (macOS 14), in the **Allow in the Background** list. The background service keeps Mounts and syncing running while the window is closed.
+4. Enable the CloudWire Finder extension when onboarding asks. You can also turn it on later under **System Settings > General > Login Items & Extensions > Extensions** (macOS 15 and later) or **System Settings > Privacy & Security > Extensions > Added Extensions** (macOS 14). It provides the Finder context menu and the sync badges.
+5. After each update, macOS asks once whether CloudWire may access its Keychain items. Click **Always Allow**. This happens because ad-hoc signed builds get a new code signature with every release.
+
+Verify the download with the checksum file:
+
+```sh
+shasum -a 256 -c CloudWire-{{VERSION}}.dmg.sha256
+```
+
+## Notes
+
+- CloudWire is pre-release software. Keep backups of important data, and try Offline Items on a test folder first.
+- Full documentation, troubleshooting and build instructions: https://github.com/DonMikone/CloudWire#readme

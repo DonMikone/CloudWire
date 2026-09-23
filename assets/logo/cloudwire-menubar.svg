@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+  <title>CloudWire</title>
+  <!-- menu bar template: the icon's cable line only, black on transparent -->
+  <path d="M2.99 21.02 A8.2 8.2 0 0 0 4.7 19.99 A8.2 8.2 0 0 1 9.75 18.25 H23.69 A4.43 4.43 0 1 0 23.05 9.44 A5.74 5.74 0 0 0 11.83 10.4 A3.94 3.94 0 1 0 11.39 18.25 H23.69 A4.92 4.92 0 0 1 27.95 20.71" fill="none" stroke="#000000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#000000" transform="translate(27.95 20.71) rotate(60)">
+    <rect x="-0.4" y="-2.6" width="5.6" height="5.2" rx="1.1"/>
+    <rect x="5" y="-1.5" width="3.4" height="3"/>
+    <path d="M9.3 -1.5 H11.6 A1.6 1.5 0 0 1 11.6 1.5 H9.3 Z"/>
+  </g>
+</svg>
