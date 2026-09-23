@@ -1,0 +1,6 @@
+build/
+DerivedData/
+*.xcodeproj/
+.DS_Store
+xcuserdata/
+core/coverage.out

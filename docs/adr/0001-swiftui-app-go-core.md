@@ -1,0 +1,5 @@
+# SwiftUI App with a Go Core LaunchAgent
+
+CloudWire's UI is SwiftUI (only Swift can host the Finder Sync extension and native menu bar/login-item APIs) while all file work runs in a Go Core that embeds rclone as a library through its in-process rc API (`librclone.RPC`). This avoids shipping and supervising a separate rclone binary and keeps the heavy lifting in the language rclone is written in. The Core is a launchd LaunchAgent so Mounts and sync survive UI crashes and run without the UI.
+
+The App registers the Core with `SMAppService` (launchd `BundleProgram` inside the app bundle). launchd resolves that bundle by identifier and pins the registered code identity, which breaks with ad-hoc signed updates or several CloudWire copies on disk. The App therefore registers the agent again whenever the bundled `cloudwire-core` changes, and if the agent still does not start it falls back to a user LaunchAgent in `~/Library/LaunchAgents` with an absolute `Program` path, loaded with `launchctl bootstrap`.
