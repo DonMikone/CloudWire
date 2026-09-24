@@ -221,6 +221,8 @@ Other targets:
 
 Releases are built by GitHub Actions when a `v*` tag is pushed. The workflow signs and notarises automatically once Developer ID secrets are configured; otherwise it publishes an ad-hoc signed DMG.
 
+Every change that ships gets a new tag following [Semantic Versioning](https://semver.org): the patch number for fixes, the minor number for new features, the major number for breaking changes (for example stored data or settings that older versions cannot read). The tag sets the app version and the DMG name (`CloudWire-<version>.dmg`).
+
 ## Contributing
 
 Issues and pull requests are welcome. Please open an issue first for larger changes so we can agree on the approach. Before submitting, run `make test`, and describe how you verified the change. The domain language in [`CONTEXT.md`](CONTEXT.md) and the decisions in [`docs/adr`](docs/adr) are a good place to start.
