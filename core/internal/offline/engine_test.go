@@ -3,13 +3,17 @@ package offline
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
+	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
 	"github.com/DonMikone/CloudWire/core/internal/store"
@@ -573,6 +577,63 @@ func TestNoRunsWhileRelocatingOrRemoving(t *testing.T) {
 	h.step()
 	if len(h.started()) != 1 {
 		t.Fatal("item must run again after the move finished")
+	}
+}
+
+func TestSetSelectionKeep(t *testing.T) {
+	h := newHarness(t)
+	a := h.addItem("a")
+	writeFiles(t, a.StoragePath, "x/1.txt", "y/2.txt")
+	params := SelectionParams{ID: "a", Kind: "files", Files: []string{"x/"}}
+	var inv api.InvalidParams
+	if _, err := h.e.SetSelection(context.Background(), params); !errors.As(err, &inv) {
+		t.Fatalf("deselecting without a localCopy choice: %v", err)
+	}
+	params.LocalCopy = "keep"
+	if _, err := h.e.SetSelection(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	it := h.state("a")
+	if it.Kind != "files" || !slices.Equal(it.Files, []string{"x"}) || !it.NeedsResync {
+		t.Fatalf("stored item %+v", it)
+	}
+	filters, _ := os.ReadFile(paths.ForHome(h.dir).FiltersFile("a"))
+	if !strings.Contains(string(filters), "+ /x\n+ /x/**\n- **\n") {
+		t.Fatalf("filters %q", filters)
+	}
+	if _, err := os.Stat(filepath.Join(a.StoragePath, "y/2.txt")); err != nil {
+		t.Fatalf("kept local copy is gone: %v", err)
+	}
+	got, _ := h.e.StatusForPaths([]string{filepath.Join(a.StoragePath, "x/1.txt"), filepath.Join(a.StoragePath, "y/2.txt")})
+	if got[filepath.Join(a.StoragePath, "x/1.txt")] != "synced" || got[filepath.Join(a.StoragePath, "y/2.txt")] != "none" {
+		t.Fatalf("badges %v", got)
+	}
+	// Widening back to the whole root needs no choice: nothing is deselected.
+	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "a", Kind: "folder"}); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.state("a"); it.Kind != "folder" || len(it.Files) != 0 {
+		t.Fatalf("widened item %+v", it)
+	}
+}
+
+func TestStatusForNestedStorage(t *testing.T) {
+	h := newHarness(t)
+	inner := h.addItem("in") // folder item "in" at store/in
+	outer := store.OfflineItem{ID: "out", ConnectionID: "c1", Kind: "files", Files: []string{"other/x.wav"},
+		StoragePath: filepath.Join(h.dir, "store"), State: StateIdle} // listed before the inner item
+	if err := h.st.InsertOfflineItem(outer); err != nil {
+		t.Fatal(err)
+	}
+	h.e.localChange("in", "Song.wav", h.now)
+	song, other, loose := filepath.Join(inner.StoragePath, "Song.wav"), filepath.Join(outer.StoragePath, "other/x.wav"),
+		filepath.Join(outer.StoragePath, "loose.txt")
+	got, err := h.e.StatusForPaths([]string{song, other, loose})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[song] != "syncing" || got[other] != "synced" || got[loose] != "none" {
+		t.Fatalf("the innermost item that syncs a path decides: %v", got)
 	}
 }
 

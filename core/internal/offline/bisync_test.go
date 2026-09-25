@@ -62,8 +62,9 @@ func TestFilterLines(t *testing.T) {
 	if got := FilterLines(folder); !reflect.DeepEqual(got, []string{"- .DS_Store", "- ._*", "- .Trashes/**"}) {
 		t.Fatalf("folder filters %q", got)
 	}
-	files := store.OfflineItem{Kind: "files", Excludes: []string{".DS_Store"}, Files: []string{"Mix [final].wav", "a*b?.aif", "Take {1}.wav"}}
-	want := []string{"- .DS_Store", `+ /Mix \[final\].wav`, `+ /a\*b\?.aif`, `+ /Take \{1\}.wav`, "- **"}
+	files := store.OfflineItem{Kind: "files", Excludes: []string{".DS_Store"}, Files: []string{"Mix [final].wav", "a*b?.aif", "Take {1}.wav", "Meine Daten/123/B"}}
+	want := []string{"- .DS_Store", `+ /Mix \[final\].wav`, `+ /Mix \[final\].wav/**`, `+ /a\*b\?.aif`, `+ /a\*b\?.aif/**`,
+		`+ /Take \{1\}.wav`, `+ /Take \{1\}.wav/**`, "+ /Meine Daten/123/B", "+ /Meine Daten/123/B/**", "- **"}
 	if got := FilterLines(files); !reflect.DeepEqual(got, want) {
 		t.Fatalf("files filters\n got %q\nwant %q", got, want)
 	}
@@ -145,6 +146,7 @@ func TestValidateOverlapAndMerge(t *testing.T) {
 	existing := []store.OfflineItem{
 		{ID: "f", ConnectionID: "c1", Kind: "folder", RemotePath: "Music/Projekte", StoragePath: "/Users/mike/CloudWire/NC/Music/Projekte"},
 		{ID: "s", ConnectionID: "c1", Kind: "files", RemotePath: "Samples", Files: []string{"kick.wav"}, StoragePath: "/Users/mike/CloudWire/NC/Samples"},
+		{ID: "t", ConnectionID: "c3", Kind: "files", RemotePath: "", Files: []string{"M/123/B"}, StoragePath: "/Users/mike/CloudWire/C3"},
 	}
 	cases := []struct {
 		name string
@@ -164,6 +166,16 @@ func TestValidateOverlapAndMerge(t *testing.T) {
 		{"app support", store.OfflineItem{ConnectionID: "c2", Kind: "folder", RemotePath: "A", StoragePath: "/Users/mike/Library/Application Support/CloudWire/x"}, "offline.overlap"},
 		{"vault folder", store.OfflineItem{ConnectionID: "c2", Kind: "folder", RemotePath: "Docs/Privat.cwvault", StoragePath: "/Users/mike/U"}, "offline.vaultFolder"},
 		{"inside vault folder", store.OfflineItem{ConnectionID: "c2", Kind: "files", RemotePath: "Privat.cwvault/d", Files: []string{"x"}, StoragePath: "/Users/mike/T"}, "offline.vaultFolder"},
+		{"selection contains other's", store.OfflineItem{ConnectionID: "c3", Kind: "files", Files: []string{"M/123"}, StoragePath: "/Users/mike/R"}, "offline.overlap"},
+		{"selection inside other's", store.OfflineItem{ConnectionID: "c3", Kind: "files", Files: []string{"M/123/B/x"}, StoragePath: "/Users/mike/R"}, "offline.overlap"},
+		{"sibling selection", store.OfflineItem{ConnectionID: "c3", Kind: "files", Files: []string{"M/123/C"}, StoragePath: "/Users/mike/Q"}, ""},
+		{"folder next to selection", store.OfflineItem{ConnectionID: "c3", Kind: "folder", RemotePath: "M/123/A", StoragePath: "/Users/mike/P"}, ""},
+		{"vault in nested selection", store.OfflineItem{ConnectionID: "c2", Kind: "files", Files: []string{"Docs/Privat.cwvault/x"}, StoragePath: "/Users/mike/O"}, "offline.vaultFolder"},
+		{"root item holding others at their cloud path", store.OfflineItem{ConnectionID: "c1", Kind: "files", Files: []string{"Other"}, StoragePath: "/Users/mike/CloudWire/NC"}, ""},
+		{"root item holding others elsewhere", store.OfflineItem{ConnectionID: "c1", Kind: "files", Files: []string{"Other"}, StoragePath: "/Users/mike/CloudWire"}, "offline.overlap"},
+		{"nested at its cloud path of another connection", store.OfflineItem{ConnectionID: "c2", Kind: "files", Files: []string{"Other"}, StoragePath: "/Users/mike/CloudWire/NC"}, "offline.overlap"},
+		{"folder item inside a root item at its cloud path", store.OfflineItem{ConnectionID: "c3", Kind: "folder", RemotePath: "M/other", StoragePath: "/Users/mike/CloudWire/C3/M/other"}, ""},
+		{"folder item inside a root item elsewhere", store.OfflineItem{ConnectionID: "c3", Kind: "folder", RemotePath: "M/other", StoragePath: "/Users/mike/CloudWire/C3/other"}, "offline.overlap"},
 	}
 	for _, c := range cases {
 		_, err := validateNew(c.it, existing, []string{"/Users/mike/CloudWire/Laufwerke/NC"}, p)
@@ -175,5 +187,9 @@ func TestValidateOverlapAndMerge(t *testing.T) {
 	v, err := validateNew(merge, existing, nil, p)
 	if err != nil || v.mergeInto == nil || v.mergeInto.ID != "s" {
 		t.Fatalf("files merge case: %+v %v", v, err)
+	}
+	root := store.OfflineItem{ConnectionID: "c3", Kind: "folder", RemotePath: "", StoragePath: "/Users/mike/CloudWire/C3"}
+	if v, err = validateNew(root, existing, nil, p); err != nil || v.mergeInto == nil || v.mergeInto.ID != "t" {
+		t.Fatalf("folder into files merge case: %+v %v", v, err)
 	}
 }

@@ -90,6 +90,9 @@ printf 'the secret plan' | dav -T - "$(dav_url Secret/plan.txt)"
 dav -X MKCOL "$(dav_url Samples)" >/dev/null
 printf 'kick' | dav -T - "$(dav_url Samples/kick.wav)"
 printf 'snare' | dav -T - "$(dav_url Samples/snare.wav)"
+for d in Tree Tree/123 Tree/123/A Tree/123/B Tree/123/C; do dav -X MKCOL "$(dav_url "$d")" >/dev/null; done
+printf 'readme' | dav -T - "$(dav_url Tree/123/readme.txt)"
+for d in A B C; do printf "$d" | dav -T - "$(dav_url "Tree/123/$d/$(echo "$d" | tr ABC abc).txt")"; done
 ok "cloud seeded"
 
 log "Starting the isolated Core in $CW_HOME"
@@ -180,6 +183,23 @@ rpc offline.create "{\"connectionId\":\"$CID\",\"kind\":\"files\",\"remotePath\"
   && ok "second file merged into the files item" || fail "files merge"
 snare_synced() { [ -f "$FP/snare.wav" ]; }
 wait_for 60 "merged file synced" snare_synced
+
+log "Tree selection"
+# Default Storage Location <Base>/<Connection>: it holds the folder and files items above at their cloud path.
+TID="$(rpc offline.create "{\"connectionId\":\"$CID\",\"kind\":\"files\",\"remotePath\":\"\",\"files\":[\"Tree/123/B\",\"Tree/123/C\"]}" | jq -r .id)"
+TROOT="$(rpc offline.list | jq -r ".[] | select(.id==\"$TID\") | .storagePath")"
+[ "$TROOT/Music" = "$SP" ] && ok "tree item shares its Storage Location with the items at their cloud path" || fail "unexpected storage $TROOT"
+TP="$TROOT/Tree/123"
+tree_synced() { [ -f "$TP/B/b.txt" ] && [ -f "$TP/C/c.txt" ]; }
+wait_for 60 "checked folders synced at their cloud path" tree_synced
+[ ! -e "$TP/A" ] && [ ! -e "$TP/readme.txt" ] && ok "unchecked folder and parent files stay in the cloud" || fail "unselected items synced"
+rpc offline.setSelection "{\"id\":\"$TID\",\"kind\":\"files\",\"files\":[\"Tree/123/B\"],\"localCopy\":\"keep\"}" | jq -e '.files == ["Tree/123/B"]' >/dev/null \
+  && ok "selection narrowed" || fail "setSelection"
+resynced() { rpc offline.list | jq -e ".[] | select(.id==\"$TID\") | .state == \"idle\" and .needsResync == false"; }
+wait_for 60 "resync after the selection change" resynced
+exists_remote Tree/123/C/c.txt && ok "deselected folder untouched in the cloud" || fail "deselected folder deleted in the cloud"
+[ -f "$TP/C/c.txt" ] && ok "deselected local copy kept" || fail "kept local copy removed"
+[ "$(cat "$SP/Mix.wav")" = "local edit!" ] && exists_remote Music/local-new.wav && ok "nested folder item untouched" || fail "nested folder item changed"
 
 log "Shares"
 rpc shares.capabilities "{\"connectionId\":\"$CID\"}" | jq -e '.publicLink and .internalLink and .userShare and .emailShare and .manage' >/dev/null && ok "capabilities" || fail "capabilities"

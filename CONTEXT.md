@@ -13,11 +13,15 @@ A Connection path permanently attached as a Finder volume whose files are stream
 _Avoid_: Drive, Volume
 
 **Offline Item** (UI: Offline-Element):
-A cloud folder, or selected files of one cloud folder, kept as real local files and synced both ways.
+A Selection of one Connection's folders and files, kept as real local files at their cloud path below one Storage Location and synced both ways.
 _Avoid_: Pinned file, Cache, Selective sync
 
+**Selection** (UI: Auswahl):
+The checked folders and files of an Offline Item. A checked folder includes everything below it, including later additions; parent folders of checked items are kept only as structure.
+_Avoid_: Include list, Filter
+
 **Storage Location** (UI: Speicherort):
-The local directory that holds an Offline Item's files.
+The local directory that mirrors an Offline Item's root folder.
 
 **Base Folder** (UI: Basisordner):
 The default parent directory for new Storage Locations.

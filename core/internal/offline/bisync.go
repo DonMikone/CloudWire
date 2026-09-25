@@ -128,7 +128,9 @@ func FilterLines(it store.OfflineItem) []string {
 	}
 	if it.Kind == "files" {
 		for _, f := range it.Files {
-			lines = append(lines, "+ /"+globEscape(f))
+			// rclone adds the parent folders as directory includes, so they
+			// are traversed while their own files stay excluded.
+			lines = append(lines, "+ /"+globEscape(f), "+ /"+globEscape(f)+"/**")
 		}
 		lines = append(lines, "- **")
 	}
@@ -189,7 +191,7 @@ func Excluded(rel string, excludes []string) bool {
 // ItemName is the short display name of an Offline Item, as shown in the app.
 func ItemName(it store.OfflineItem) string {
 	if it.Kind == "files" && len(it.Files) == 1 {
-		return it.Files[0]
+		return path.Base(it.Files[0])
 	}
 	if it.RemotePath != "" {
 		return path.Base(it.RemotePath)

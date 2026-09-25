@@ -159,23 +159,20 @@ enum ActionHandler {
                            name: (path as NSString).lastPathComponent, manage: manage)
     }
 
-    /// One folder → folder item; files of one folder → files item.
+    /// Any folders and files of one Connection, preselected in the tree.
     private static func offlineDraft(for paths: [String]) async throws -> OfflineDraft {
         let client = AppModel.shared.client
-        if paths.count == 1, isDirectory(paths[0]) {
-            let resolved = try await client.resolvePath(paths[0])
-            return OfflineDraft(connectionId: resolved.connectionId, remotePath: resolved.remotePath, kind: .folder,
-                                files: [])
+        var resolved: [PathResolution] = []
+        for path in paths {
+            resolved.append(try await client.resolvePath(path))
         }
-        let parents = Set(paths.map { ($0 as NSString).deletingLastPathComponent })
-        guard parents.count == 1, !paths.contains(where: isDirectory) else {
+        guard let connectionId = resolved.first?.connectionId,
+              resolved.allSatisfy({ $0.connectionId == connectionId })
+        else {
             throw CoreError(code: "client.selection",
-                            message: String(localized: "Select one folder, or files from one folder."))
+                            message: String(localized: "Select items from one Connection."))
         }
-        let resolved = try await client.resolvePath(paths[0])
-        let parent = (resolved.remotePath as NSString).deletingLastPathComponent
-        return OfflineDraft(connectionId: resolved.connectionId, remotePath: parent, kind: .files,
-                            files: paths.map { ($0 as NSString).lastPathComponent })
+        return OfflineDraft(connectionId: connectionId, paths: resolved.map(\.remotePath))
     }
 
     private static func copyToPasteboard(_ urls: [String]) {

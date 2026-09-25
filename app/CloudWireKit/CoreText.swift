@@ -340,7 +340,11 @@ public struct CoreText: Sendable, Hashable {
         },
         "offline.filesAdded": { a in
             guard let count = a.int("count"), let name = a["name"] else { return nil }
-            return String(localized: "Added \(count) files to Offline Item “\(name)”", bundle: a.bundle)
+            return String(localized: "Added \(count) items to Offline Item “\(name)”", bundle: a.bundle)
+        },
+        "offline.selectionChanged": { a in
+            guard let name = a["name"] else { return nil }
+            return String(localized: "Selection of “\(name)” changed", bundle: a.bundle)
         },
         "offline.settingsChanged": { a in
             guard let name = a["name"] else { return nil }

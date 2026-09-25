@@ -55,10 +55,8 @@ struct ShareTarget: Codable, Hashable {
 struct OfflineDraft: Identifiable, Hashable {
     let id = UUID()
     var connectionId: String
-    /// What to preselect: a folder ("" = Connection root) or the files' folder; nil selects nothing.
-    var remotePath: String?
-    var kind: OfflineKind
-    var files: [String]
+    /// What to preselect: Connection-relative paths ("" = the whole Connection); empty selects nothing.
+    var paths: [String]
 }
 
 /// Prefill for the encrypt-existing sheet.

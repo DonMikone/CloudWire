@@ -443,13 +443,19 @@ public struct OfflineItem: Decodable, Sendable, Hashable, Identifiable {
     /// The translatable error of an item in the `error` state (`reason` with its code).
     public var errorText: CoreText { CoreText(code: reasonCode, params: reasonParams, message: reason) }
 
-    /// A short display name: the folder name, or the file names for `files` items.
+    /// A short display name: the folder name, or the names of the selected paths for `files` items.
     public var displayName: String {
         if kind == .files, !files.isEmpty {
-            return files.count == 1 ? files[0] : files.joined(separator: ", ")
+            return files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
         }
         let last = remotePath.split(separator: "/").last.map(String.init) ?? ""
         return last.isEmpty ? (storagePath as NSString).lastPathComponent : last
+    }
+
+    /// The Connection-relative paths the item syncs ("" = the whole Connection).
+    public var coveredPaths: [String] {
+        guard kind == .files else { return [remotePath] }
+        return files.map { remotePath.isEmpty ? $0 : remotePath + "/" + $0 }
     }
 
     public init(from decoder: any Decoder) throws {

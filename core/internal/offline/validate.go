@@ -2,7 +2,6 @@ package offline
 
 import (
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
@@ -17,36 +16,28 @@ func remoteWithin(a, b string) bool {
 	return b == "" || a == b || strings.HasPrefix(a, b+"/")
 }
 
+// CoveredRemote returns the Connection-relative remote paths an item syncs.
+func CoveredRemote(it store.OfflineItem) []string {
+	sel := selectionOf(it)
+	out := make([]string, 0, len(sel))
+	for _, e := range sel {
+		out = append(out, joinRemote(it.RemotePath, e))
+	}
+	return out
+}
+
 // remoteOverlap reports whether two items of one Connection cover a common
 // remote path.
 func remoteOverlap(a, b store.OfflineItem) bool {
 	if a.ConnectionID != b.ConnectionID {
 		return false
 	}
-	switch {
-	case a.Kind == "folder" && b.Kind == "folder":
-		return remoteWithin(a.RemotePath, b.RemotePath) || remoteWithin(b.RemotePath, a.RemotePath)
-	case a.Kind == "folder" && b.Kind == "files":
-		return filesWithin(b, a.RemotePath)
-	case a.Kind == "files" && b.Kind == "folder":
-		return filesWithin(a, b.RemotePath)
-	default:
-		if strings.Trim(a.RemotePath, "/") != strings.Trim(b.RemotePath, "/") {
-			return false
-		}
-		for _, f := range a.Files {
-			if slices.Contains(b.Files, f) {
+	bs := CoveredRemote(b)
+	for _, x := range CoveredRemote(a) {
+		for _, y := range bs {
+			if remoteWithin(x, y) || remoteWithin(y, x) {
 				return true
 			}
-		}
-		return false
-	}
-}
-
-func filesWithin(it store.OfflineItem, folder string) bool {
-	for _, f := range it.Files {
-		if remoteWithin(joinRemote(it.RemotePath, f), folder) {
-			return true
 		}
 	}
 	return false
@@ -57,12 +48,35 @@ func joinRemote(dir, name string) string {
 	if dir == "" {
 		return name
 	}
+	if name == "" {
+		return dir
+	}
 	return dir + "/" + name
+}
+
+// nestedAtCloudPath reports whether the Storage Location of one item lies in
+// the other's exactly at its cloud path, where the outer item, which mirrors
+// its root, would keep it. The remote paths must not overlap (checked before):
+// each item then syncs only its own part of the shared folders.
+func nestedAtCloudPath(a, b store.OfflineItem) bool {
+	if a.ConnectionID != b.ConnectionID {
+		return false
+	}
+	outer, inner := a, b
+	if len(outer.StoragePath) > len(inner.StoragePath) {
+		outer, inner = b, a
+	}
+	root, innerRoot := strings.Trim(outer.RemotePath, "/"), strings.Trim(inner.RemotePath, "/")
+	if !remoteWithin(innerRoot, root) || innerRoot == root {
+		return false
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(innerRoot, root), "/")
+	return inner.StoragePath == filepath.Join(outer.StoragePath, filepath.FromSlash(rel))
 }
 
 // Validation outcome of a new item.
 type validation struct {
-	// mergeInto is set when the new files must be appended to an existing files item.
+	// mergeInto is set when the new Selection must be merged into an existing item.
 	mergeInto *store.OfflineItem
 }
 
@@ -73,9 +87,11 @@ const vaultFolderSuffix = ".cwvault"
 // validateNew checks a new item against the existing ones and the system.
 func validateNew(nu store.OfflineItem, existing []store.OfflineItem, mountPoints []string, p paths.Paths) (validation, error) {
 	var v validation
-	for _, part := range strings.Split(nu.RemotePath, "/") {
-		if strings.HasSuffix(part, vaultFolderSuffix) {
-			return v, api.Fail("offline.vaultFolder", msg.New("offline.vaultFolder", "folder", part))
+	for _, covered := range CoveredRemote(nu) {
+		for _, part := range strings.Split(covered, "/") {
+			if strings.HasSuffix(part, vaultFolderSuffix) {
+				return v, api.Fail("offline.vaultFolder", msg.New("offline.vaultFolder", "folder", part))
+			}
 		}
 	}
 	sp := nu.StoragePath
@@ -97,7 +113,7 @@ func validateNew(nu store.OfflineItem, existing []store.OfflineItem, mountPoints
 	}
 	for i := range existing {
 		ex := existing[i]
-		if nu.Kind == "files" && ex.Kind == "files" && ex.ConnectionID == nu.ConnectionID &&
+		if ex.ConnectionID == nu.ConnectionID &&
 			strings.Trim(ex.RemotePath, "/") == strings.Trim(nu.RemotePath, "/") && ex.StoragePath == sp {
 			v.mergeInto = &existing[i]
 			continue
@@ -106,7 +122,7 @@ func validateNew(nu store.OfflineItem, existing []store.OfflineItem, mountPoints
 			return v, api.Fail("offline.overlap", msg.New("offline.overlapsItem", "name", ItemName(ex), "path", ex.StoragePath)).
 				WithData("itemId", ex.ID)
 		}
-		if paths.IsWithin(sp, ex.StoragePath) || paths.IsWithin(ex.StoragePath, sp) {
+		if (paths.IsWithin(sp, ex.StoragePath) || paths.IsWithin(ex.StoragePath, sp)) && !nestedAtCloudPath(nu, ex) {
 			return v, api.Fail("offline.overlap", msg.New("offline.storageOverlapsItem", "name", ItemName(ex), "path", ex.StoragePath)).
 				WithData("itemId", ex.ID)
 		}

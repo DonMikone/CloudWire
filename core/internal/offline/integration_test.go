@@ -257,3 +257,52 @@ func TestBisyncFilesItemSyncsOnlyListedFiles(t *testing.T) {
 		t.Fatal("an unlisted local file was uploaded")
 	}
 }
+
+// allFiles lists the regular files below dir, relative and sorted.
+func allFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, p)
+		out = append(out, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestBisyncNestedSelectionMirrorsTree(t *testing.T) {
+	pr := newPair(t, "files", "Meine Daten/123/B", "Meine Daten/123/C")
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	for _, f := range []string{"Meine Daten/123/A/a.txt", "Meine Daten/123/B/b.txt", "Meine Daten/123/C/c.txt",
+		"Meine Daten/123/readme.txt", "Meine Daten/other.txt"} {
+		write(t, filepath.Join(pr.cloud, f), f, base)
+	}
+	if err := pr.sync(false); err != nil {
+		t.Fatal(err)
+	}
+	if got := allFiles(t, pr.local); !slices.Equal(got, []string{"Meine Daten/123/B/b.txt", "Meine Daten/123/C/c.txt"}) {
+		t.Fatalf("local files %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(pr.local, "Meine Daten/123/A")); err == nil {
+		t.Fatal("an unselected folder was created locally")
+	}
+	// A checked folder includes later additions; parents stay structure only.
+	write(t, filepath.Join(pr.cloud, "Meine Daten/123/B/New/n.txt"), "new", base)
+	write(t, filepath.Join(pr.local, "Meine Daten/123/local.txt"), "mine", base)
+	if err := pr.sync(false); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(pr.local, "Meine Daten/123/B/New/n.txt")); got != "new" {
+		t.Fatalf("new cloud file %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(pr.cloud, "Meine Daten/123/local.txt")); err == nil {
+		t.Fatal("a local file in a structure-only parent was uploaded")
+	}
+}

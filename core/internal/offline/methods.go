@@ -100,28 +100,40 @@ func (e *Engine) Preflight(ctx context.Context, p PreflightParams) (PreflightRes
 
 func remoteSize(remote, kind, remotePath string, files []string) (int64, error) {
 	if kind == "files" {
-		var res struct {
-			List []struct {
-				Name  string `json:"Name"`
-				Size  int64  `json:"Size"`
-				IsDir bool   `json:"IsDir"`
-			} `json:"list"`
-		}
-		if err := rcl.CallInto("operations/list", map[string]any{"fs": remote + ":", "remote": remotePath}, &res); err != nil {
-			return 0, err
-		}
 		var n int64
-		for _, e := range res.List {
-			if !e.IsDir && slices.Contains(files, e.Name) && e.Size > 0 {
-				n += e.Size
+		for _, f := range files {
+			p := joinRemote(remotePath, f)
+			var st struct {
+				Item *struct {
+					IsDir bool  `json:"IsDir"`
+					Size  int64 `json:"Size"`
+				} `json:"item"`
+			}
+			if err := rcl.CallInto("operations/stat", map[string]any{"fs": remote + ":", "remote": p}, &st); err != nil {
+				return 0, err
+			}
+			switch {
+			case st.Item == nil:
+			case st.Item.IsDir:
+				bytes, err := folderSize(remote, p)
+				if err != nil {
+					return 0, err
+				}
+				n += bytes
+			case st.Item.Size > 0:
+				n += st.Item.Size
 			}
 		}
 		return n, nil
 	}
+	return folderSize(remote, remotePath)
+}
+
+func folderSize(remote, p string) (int64, error) {
 	var res struct {
 		Bytes int64 `json:"bytes"`
 	}
-	if err := rcl.CallInto("operations/size", map[string]any{"fs": remote + ":" + remotePath}, &res); err != nil {
+	if err := rcl.CallInto("operations/size", map[string]any{"fs": remote + ":" + p}, &res); err != nil {
 		return 0, err
 	}
 	return max(res.Bytes, 0), nil
@@ -186,7 +198,8 @@ func (e *Engine) mountPoints() []string {
 	return out
 }
 
-// Create adds an Offline Item (or appends files to an existing files item).
+// Create adds an Offline Item (or merges its Selection into an existing item
+// with the same root and Storage Location).
 func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 	conn, err := e.Conns.Get(p.ConnectionID)
 	if err != nil {
@@ -197,23 +210,11 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 	}
 	it := store.OfflineItem{ID: store.NewID(), ConnectionID: conn.ID, Kind: p.Kind, RemotePath: strings.Trim(p.RemotePath, "/"),
 		NeedsResync: true, State: StatePending, CreatedAt: store.Now(), Advanced: map[string]any{}}
-	switch p.Kind {
-	case "folder":
-	case "files":
-		if len(p.Files) == 0 {
-			return DTO{}, api.Invalid("files must not be empty")
-		}
-		for _, f := range p.Files {
-			if f == "" || strings.Contains(f, "/") || f == "." || f == ".." {
-				return DTO{}, api.Invalid("invalid file name %q", f)
-			}
-			if !slices.Contains(it.Files, f) {
-				it.Files = append(it.Files, f)
-			}
-		}
-	default:
-		return DTO{}, api.Invalid("kind must be folder or files")
+	entries, err := selectionFromParams(p.Kind, p.Files)
+	if err != nil {
+		return DTO{}, err
 	}
+	applySelection(&it, entries)
 	if it.StoragePath, err = e.resolveStorage(conn, it.RemotePath, p.StoragePath); err != nil {
 		return DTO{}, err
 	}
@@ -226,7 +227,7 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 		return DTO{}, err
 	}
 	if v.mergeInto != nil {
-		return e.mergeFiles(*v.mergeInto, it.Files)
+		return e.mergeSelection(*v.mergeInto, selectionOf(it))
 	}
 	pre, err := e.Preflight(ctx, PreflightParams{ConnectionID: conn.ID, Kind: it.Kind, RemotePath: it.RemotePath, Files: it.Files, StoragePath: it.StoragePath})
 	if err != nil {
@@ -270,18 +271,20 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 	return d, nil
 }
 
-func (e *Engine) mergeFiles(snapshot store.OfflineItem, files []string) (DTO, error) {
+func (e *Engine) mergeSelection(snapshot store.OfflineItem, entries []string) (DTO, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	ex, err := e.Get(snapshot.ID)
 	if err != nil {
 		return DTO{}, err
 	}
-	for _, f := range files {
-		if !slices.Contains(ex.Files, f) {
-			ex.Files = append(ex.Files, f)
-		}
+	old := selectionOf(ex)
+	merged := mergeSelections(old, entries)
+	if slices.Equal(merged, old) {
+		return e.dtoLocked(ex), nil
 	}
+	added := uncovered(entries, old)
+	applySelection(&ex, merged)
 	e.requestResyncLocked(&ex)
 	if err := e.st.UpdateOfflineItem(ex); err != nil {
 		return DTO{}, err
@@ -290,7 +293,7 @@ func (e *Engine) mergeFiles(snapshot store.OfflineItem, files []string) (DTO, er
 		return DTO{}, err
 	}
 	e.itemRT(ex.ID).due = e.Now()
-	e.log.Info("offline", ex.ID, msg.New("offline.filesAdded", "count", len(files), "name", ItemName(ex)), files)
+	e.log.Info("offline", ex.ID, msg.New("offline.filesAdded", "count", len(added), "name", ItemName(ex)), added)
 	d := e.dtoLocked(ex)
 	e.pub.Publish("offline.status", d)
 	e.poke()
@@ -384,7 +387,7 @@ func (e *Engine) Relocate(ctx context.Context, id, newPath string) (DTO, error) 
 		return DTO{}, api.Fail("offline.storageNotEmpty", msg.New("folder.notEmpty", "path", dst))
 	}
 	e.stopItem(id)
-	leftovers, err := moveItem(it, dst)
+	leftovers, err := moveItem(it, dst, storageRoots(others))
 	if err != nil {
 		e.restartItem(it)
 		return DTO{}, api.Fail("offline.locationMissing", msg.New("offline.moveFailed", "detail", err))
@@ -416,6 +419,82 @@ func (e *Engine) Relocate(ctx context.Context, id, newPath string) (DTO, error) 
 	return e.restartItem(it), nil
 }
 
+// SelectionParams are offline.setSelection params.
+type SelectionParams struct {
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind"`
+	Files     []string `json:"files"`
+	LocalCopy string   `json:"localCopy"`
+}
+
+// SetSelection replaces an item's Selection; deselected local parts go to the
+// Trash or stay. The cloud is never touched: the new filters exclude the
+// deselected paths before the next run, so their local removal is not synced.
+func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, error) {
+	it, err := e.Get(p.ID)
+	if err != nil {
+		return DTO{}, err
+	}
+	next, err := selectionFromParams(p.Kind, p.Files)
+	if err != nil {
+		return DTO{}, err
+	}
+	old := selectionOf(it)
+	if slices.Equal(old, next) {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.dtoLocked(it), nil
+	}
+	gone := uncovered(old, next)
+	if len(gone) > 0 && p.LocalCopy != "trash" && p.LocalCopy != "keep" {
+		return DTO{}, api.Invalid("localCopy must be trash or keep")
+	}
+	existing, err := e.st.OfflineItems()
+	if err != nil {
+		return DTO{}, err
+	}
+	others := slices.DeleteFunc(slices.Clone(existing), func(x store.OfflineItem) bool { return x.ID == it.ID })
+	probe := it
+	applySelection(&probe, next)
+	if _, err := validateNew(probe, others, e.mountPoints(), e.paths); err != nil {
+		return DTO{}, err
+	}
+	var targets []string
+	if p.LocalCopy == "trash" {
+		if targets, err = deselectedLocal(it.StoragePath, gone, next); err != nil {
+			return DTO{}, api.Fail("offline.locationMissing", msg.New("offline.trashFailed", "detail", err))
+		}
+	}
+	e.stopItem(it.ID)
+	e.mu.Lock()
+	fresh, err := e.Get(it.ID)
+	if err == nil {
+		applySelection(&fresh, next)
+		e.requestResyncLocked(&fresh)
+		if err = e.st.UpdateOfflineItem(fresh); err == nil {
+			err = WriteFilters(e.paths, fresh)
+		}
+	}
+	e.mu.Unlock()
+	if err != nil {
+		e.restartItem(it)
+		return DTO{}, err
+	}
+	var errs []error
+	for _, t := range targets {
+		if err := platform.MoveToTrash(t); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removeEmptyParents(fresh.StoragePath, t, next, storageRoots(others))
+	}
+	if len(errs) > 0 {
+		e.log.Warn("offline", it.ID, msg.New("offline.trashFailed", "detail", errs[0]), errorStrings(errs))
+	}
+	e.log.Info("offline", it.ID, msg.New("offline.selectionChanged", "name", ItemName(fresh)), gone)
+	return e.restartItem(fresh), nil
+}
+
 func (e *Engine) restartItem(it store.OfflineItem) DTO {
 	e.mu.Lock()
 	rt := e.itemRT(it.ID)
@@ -435,7 +514,8 @@ func (e *Engine) restartItem(it store.OfflineItem) DTO {
 // moveItem moves the local files: the whole folder, or each listed file. err
 // means the data is not (completely) at dst; leftovers are sources that were
 // copied but could not be deleted afterwards.
-func moveItem(it store.OfflineItem, dst string) (leftovers []error, err error) {
+// roots are the Storage Locations of the other items; they are never removed.
+func moveItem(it store.OfflineItem, dst string, roots []string) (leftovers []error, err error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return nil, err
 	}
@@ -448,13 +528,18 @@ func moveItem(it store.OfflineItem, dst string) (leftovers []error, err error) {
 			if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			left, err := movePath(src, filepath.Join(dst, f))
+			target := filepath.Join(dst, f)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return leftovers, err
+			}
+			left, err := movePath(src, target)
 			if err != nil {
 				return leftovers, err
 			}
 			if left != nil {
 				leftovers = append(leftovers, left)
 			}
+			removeEmptyParents(it.StoragePath, src, nil, roots)
 		}
 		return leftovers, nil
 	}
@@ -497,6 +582,15 @@ func errorStrings(errs []error) []string {
 	out := make([]string, 0, len(errs))
 	for _, e := range errs {
 		out = append(out, e.Error())
+	}
+	return out
+}
+
+// storageRoots returns the Storage Locations of items.
+func storageRoots(items []store.OfflineItem) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.StoragePath)
 	}
 	return out
 }
@@ -572,6 +666,12 @@ func (e *Engine) Remove(ctx context.Context, id, localCopy string) error {
 	}
 	e.stopItem(id)
 	if localCopy == "trash" {
+		existing, err := e.st.OfflineItems()
+		if err != nil {
+			e.restartItem(it)
+			return err
+		}
+		roots := storageRoots(slices.DeleteFunc(existing, func(x store.OfflineItem) bool { return x.ID == id }))
 		targets := []string{it.StoragePath}
 		if it.Kind == "files" {
 			targets = nil
@@ -587,6 +687,7 @@ func (e *Engine) Remove(ctx context.Context, id, localCopy string) error {
 				e.restartItem(it)
 				return api.Fail("offline.locationMissing", msg.New("offline.trashFailed", "detail", err))
 			}
+			removeEmptyParents(it.StoragePath, t, nil, roots)
 		}
 	}
 	_ = os.RemoveAll(e.paths.BisyncWorkdir(id))
@@ -697,23 +798,22 @@ func (e *Engine) StatusForPaths(pathsIn []string) (map[string]string, error) {
 	out := make(map[string]string, len(pathsIn))
 	for _, p := range pathsIn {
 		cp := filepath.Clean(p)
+		// Storage Locations may nest (at their cloud path): the innermost
+		// item that syncs the path decides.
 		var it *store.OfflineItem
 		for i := range items {
-			if paths.IsWithin(cp, items[i].StoragePath) {
+			sp := items[i].StoragePath
+			if !paths.IsWithin(cp, sp) || (it != nil && len(sp) <= len(it.StoragePath)) {
+				continue
+			}
+			rel := strings.TrimPrefix(cp, sp+"/")
+			if cp == sp || Includes(items[i], rel) || strings.Contains(filepath.Base(rel), marker) {
 				it = &items[i]
-				break
 			}
 		}
 		if it == nil {
 			out[p] = "none"
 			continue
-		}
-		if it.Kind == "files" && cp != it.StoragePath {
-			rel := strings.SplitN(strings.TrimPrefix(cp, it.StoragePath+"/"), "/", 2)[0]
-			if !slices.Contains(it.Files, rel) && !strings.Contains(rel, marker) {
-				out[p] = "none"
-				continue
-			}
 		}
 		rt := e.rt[it.ID]
 		pending := rt != nil && rt.pendingPaths[cp]

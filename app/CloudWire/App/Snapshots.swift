@@ -215,16 +215,14 @@ private final class SnapshotSession {
     }
 
     private func offlineSheets() async {
-        let add = "AddOfflineSheet + RemoteBrowser (Views/OfflineView.swift, Views/RemoteBrowser.swift)"
-        let addControls = "Connection-Picker, Browser (Breadcrumbs, „Select This Folder“/„✓ Selected“, Radio je Ordner, Checkbox je Datei), Speicherort + „Change…“ (Ordnerauswahl), „Cancel“, „Make Available Offline“ (→ ggf. Dialog „The chosen folder is not empty“)"
-        let preselected = OfflineDraft(connectionId: DemoData.nextcloudId, remotePath: "Musik/Projekte/Album 2026",
-                                       kind: .folder, files: [])
+        let add = "AddOfflineSheet + OfflineTree (Views/OfflineView.swift, Views/OfflineTree.swift)"
+        let addControls = "Connection-Picker, Baum mit Wurzel (Verbindungsname), Aufklapp-Pfeil je Ordner, Checkbox je Ordner/Datei (Teilzustand „–“ für Elternordner), gesperrte Zeilen „Already offline“, Speicherort + „Change…“ (Ordnerauswahl), „Cancel“, „Make Available Offline“ (→ ggf. Dialog „The chosen folder is not empty“)"
+        let preselected = OfflineDraft(connectionId: DemoData.nextcloudId, paths: ["Musik/Projekte/Album 2026"])
         await shot("offline-add", "Offline verfügbar machen: Ordner vorausgewählt (wie aus dem Finder), Platzprüfung ok",
                    source: add, controls: addControls, width: 640, AddOfflineSheet(draft: preselected))
         await shot("offline-add-nothing-selected", "Offline verfügbar machen über „Add“: noch nichts ausgewählt",
                    source: add, controls: addControls, width: 640,
-                   AddOfflineSheet(draft: OfflineDraft(connectionId: DemoData.nextcloudId, remotePath: nil, kind: .folder,
-                                                       files: [])))
+                   AddOfflineSheet(draft: OfflineDraft(connectionId: DemoData.nextcloudId, paths: [])))
         await shot("offline-add-low-space", "Offline verfügbar machen: zu wenig freier Speicher", source: add,
                    controls: addControls + "; Hauptbutton deaktiviert", width: 640, scenario: .lowSpace,
                    AddOfflineSheet(draft: preselected))

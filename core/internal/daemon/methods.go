@@ -187,6 +187,12 @@ func (c *Core) registerOffline() {
 		}
 		return c.offline.Relocate(ctx, p.ID, p.NewPath)
 	}))
+	h("offline.setSelection", api.Bind(func(ctx context.Context, p offline.SelectionParams) (any, error) {
+		if err := requireID(p.ID); err != nil {
+			return nil, err
+		}
+		return c.offline.SetSelection(ctx, p)
+	}))
 	h("offline.remove", api.Bind(func(ctx context.Context, p struct {
 		ID        string `json:"id"`
 		LocalCopy string `json:"localCopy"`

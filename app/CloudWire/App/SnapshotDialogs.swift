@@ -64,6 +64,12 @@ enum SnapshotDialogs {
                   message: String(localized: "Merging syncs everything already in this folder with the cloud: files only here are uploaded, and for files present on both sides the newer version wins."),
                   buttons: [String(localized: "Merge (Newer Version Wins)"), String(localized: "Choose Another Folder"),
                             cancel]),
+            Entry(file: "Views/OfflineView.swift", anchor: "Remove the local copy of deselected items?",
+                  trigger: "EditOfflineSelectionSheet: „Save“, wenn Elemente abgewählt wurden",
+                  title: String(localized: "Remove the local copy of deselected items?"),
+                  message: String(localized: "No longer synced: \("B, C"). The cloud is never touched."),
+                  buttons: [String(localized: "Move Local Copy to Trash") + " (Standard ⏎)",
+                            String(localized: "Keep Local Copy"), cancel]),
             Entry(file: "Views/SharesView.swift", anchor: "Delete this share?",
                   trigger: "Freigaben: Papierkorb-Button einer Freigabe",
                   title: String(localized: "Delete the share with \("Anna Berg")?") + " | "
@@ -150,7 +156,7 @@ enum SnapshotDialogs {
                   title: String(localized: "Choose"),
                   message: [String(localized: "Choose an empty folder for the Mount."),
                             String(localized: "Choose the new storage location. The local files are moved there, nothing is downloaded again."),
-                            String(localized: "Choose the folder in which CloudWire creates the folder for the offline copy, for example on an external SSD."),
+                            String(localized: "Choose the folder for the offline copy, for example on an external SSD. The selected items appear inside it with their cloud path."),
                             String(localized: "Choose the base folder for new Offline Items. Existing Offline Items stay where they are."),
                             String(localized: "Choose the folder in which new Mounts appear.")]
                       .joined(separator: " | ")),

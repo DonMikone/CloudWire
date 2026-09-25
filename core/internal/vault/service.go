@@ -739,8 +739,13 @@ func (s *Service) EncryptExisting(ctx context.Context, p EncryptParams) (Encrypt
 	}
 	its, _ := s.st.OfflineItems()
 	for _, it := range its {
-		if it.ConnectionID == parent.ID && (within(src, it.RemotePath) || within(it.RemotePath, src)) {
-			return EncryptResult{}, api.Fail("vault.sourceIsOffline", msg.New("vault.sourceIsOffline", "path", it.StoragePath))
+		if it.ConnectionID != parent.ID {
+			continue
+		}
+		for _, covered := range offline.CoveredRemote(it) {
+			if within(src, covered) || within(covered, src) {
+				return EncryptResult{}, api.Fail("vault.sourceIsOffline", msg.New("vault.sourceIsOffline", "path", it.StoragePath))
+			}
 		}
 	}
 	vs, _ := s.st.Vaults()

@@ -701,7 +701,7 @@
         }
       }
     },
-    "Added %lld files to Offline Item “%@”" : {
+    "Added %lld items to Offline Item “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
@@ -710,13 +710,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$lld Datei zum Offline-Element „%2$@“ hinzugefügt"
+                  "value" : "%1$lld Element zum Offline-Element „%2$@“ hinzugefügt"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%1$lld Dateien zum Offline-Element „%2$@“ hinzugefügt"
+                  "value" : "%1$lld Elemente zum Offline-Element „%2$@“ hinzugefügt"
                 }
               }
             }
@@ -728,16 +728,26 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Added %lld file to Offline Item “%@”"
+                  "value" : "Added %lld item to Offline Item “%@”"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Added %lld files to Offline Item “%@”"
+                  "value" : "Added %lld items to Offline Item “%@”"
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Additional cloud size %@ · free on disk %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zusätzliche Größe in der Cloud %1$@ · frei auf dem Volume %2$@"
           }
         }
       }
@@ -868,6 +878,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erlaubt"
+          }
+        }
+      }
+    },
+    "Already offline" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bereits offline"
           }
         }
       }
@@ -1313,6 +1333,26 @@
         }
       }
     },
+    "Change Selection" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auswahl ändern"
+          }
+        }
+      }
+    },
+    "Change Selection…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auswahl ändern…"
+          }
+        }
+      }
+    },
     "Changes that are not synced yet are no longer uploaded." : {
       "localizations" : {
         "de" : {
@@ -1413,22 +1453,12 @@
         }
       }
     },
-    "Choose the folder in which CloudWire creates the folder for the offline copy, for example on an external SSD." : {
+    "Choose the folder for the offline copy, for example on an external SSD. The selected items appear inside it with their cloud path." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wähle den Ordner, in dem CloudWire den Ordner für die Offline-Kopie anlegt, zum Beispiel auf einer externen SSD."
-          }
-        }
-      }
-    },
-    "Choose the folder in which CloudWire creates “%@” for the offline copy, for example on an external SSD." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wähle den Ordner, in dem CloudWire „%@“ für die Offline-Kopie anlegt, zum Beispiel auf einer externen SSD."
+            "value" : "Wähle den Ordner für die Offline-Kopie, zum Beispiel auf einer externen SSD. Die ausgewählten Elemente erscheinen darin mit ihrem Cloud-Pfad."
           }
         }
       }
@@ -1710,6 +1740,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "cloudwire-core fehlt im App-Paket."
+          }
+        }
+      }
+    },
+    "Collapse “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ zuklappen"
           }
         }
       }
@@ -2917,6 +2957,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vorhandener Tresor"
+          }
+        }
+      }
+    },
+    "Expand “%@”" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ aufklappen"
           }
         }
       }
@@ -4338,6 +4388,16 @@
         }
       }
     },
+    "No longer synced: %@. The cloud is never touched." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht mehr synchronisiert: %@. Die Cloud bleibt unberührt."
+          }
+        }
+      }
+    },
     "No Matching Entries" : {
       "localizations" : {
         "de" : {
@@ -4866,6 +4926,16 @@
         }
       }
     },
+    "Partially selected" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teilweise ausgewählt"
+          }
+        }
+      }
+    },
     "Password" : {
       "localizations" : {
         "de" : {
@@ -5341,6 +5411,16 @@
         }
       }
     },
+    "Remove the local copy of deselected items?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lokale Kopie der abgewählten Elemente entfernen?"
+          }
+        }
+      }
+    },
     "Remove the Offline Item %@ first; its local copy would be uploaded again" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5644,16 +5724,6 @@
         }
       }
     },
-    "Select a folder or files." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wähle einen Ordner oder Dateien."
-          }
-        }
-      }
-    },
     "Select a sync run to see its files." : {
       "localizations" : {
         "de" : {
@@ -5674,22 +5744,32 @@
         }
       }
     },
+    "Select folders or files." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle Ordner oder Dateien."
+          }
+        }
+      }
+    },
+    "Select items from one Connection." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle Objekte aus einer Verbindung."
+          }
+        }
+      }
+    },
     "Select one folder or one file." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wähle einen Ordner oder eine Datei."
-          }
-        }
-      }
-    },
-    "Select one folder, or files from one folder." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wähle einen Ordner oder Dateien aus einem Ordner."
           }
         }
       }
@@ -5714,72 +5794,22 @@
         }
       }
     },
-    "Selected: %lld files in “%@”" : {
+    "Selected: %lld items" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ausgewählt: %#@files@ in „%2$@“"
-          },
-          "substitutions" : {
-            "files" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg Datei"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg Dateien"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Selected: %#@files@ in “%2$@”"
-          },
-          "substitutions" : {
-            "files" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg file"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg files"
-                    }
-                  }
-                }
-              }
-            }
+            "value" : "Ausgewählt: %lld Elemente"
           }
         }
       }
     },
-    "Selected: folder “%@”" : {
+    "Selected: entire Connection" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ausgewählt: Ordner „%@“"
+            "value" : "Ausgewählt: gesamte Verbindung"
           }
         }
       }
@@ -5800,6 +5830,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ausgewählt: „%@“"
+          }
+        }
+      }
+    },
+    "Selection of “%@” changed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auswahl von „%@“ geändert"
           }
         }
       }

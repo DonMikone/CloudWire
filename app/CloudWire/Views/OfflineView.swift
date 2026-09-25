@@ -5,6 +5,7 @@ struct OfflineView: View {
     @Environment(AppModel.self) private var model
     @State private var adding: OfflineDraft?
     @State private var editingExcludes: OfflineItem?
+    @State private var editingSelection: OfflineItem?
     @State private var history: OfflineItem?
 
     var body: some View {
@@ -19,8 +20,7 @@ struct OfflineView: View {
                 }
                 .disabled(model.offlineItems.isEmpty)
                 Button {
-                    adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "", remotePath: nil,
-                                          kind: .folder, files: [])
+                    adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "", paths: [])
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
@@ -48,8 +48,7 @@ struct OfflineView: View {
                                 .buttonStyle(.borderedProminent)
                         } else {
                             Button("Add Offline Item") {
-                                adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "",
-                                                      remotePath: nil, kind: .folder, files: [])
+                                adding = OfflineDraft(connectionId: model.mountableConnections.first?.id ?? "", paths: [])
                             }
                             .buttonStyle(.borderedProminent)
                         }
@@ -58,7 +57,8 @@ struct OfflineView: View {
                 } else {
                     List {
                         ForEach(model.offlineItems) { item in
-                            OfflineRow(item: item, onExcludes: { editingExcludes = item }, onHistory: { history = item })
+                            OfflineRow(item: item, onSelection: { editingSelection = item },
+                                       onExcludes: { editingExcludes = item }, onHistory: { history = item })
                         }
                     }
                     .listStyle(.inset)
@@ -67,6 +67,9 @@ struct OfflineView: View {
         }
         .sheet(item: $adding, onDismiss: consumeDraft) { draft in
             AddOfflineSheet(draft: draft)
+        }
+        .sheet(item: $editingSelection, onDismiss: consumeDraft) { item in
+            EditOfflineSelectionSheet(item: item)
         }
         .sheet(item: $editingExcludes, onDismiss: consumeDraft) { item in
             ExcludesSheet(item: item)
@@ -99,7 +102,8 @@ struct OfflineView: View {
     /// Opens the add sheet for a draft handed over by Finder or a Vault. While another sheet is open the
     /// draft waits in the model and is taken when that sheet closes.
     private func consumeDraft() {
-        guard adding == nil, editingExcludes == nil, history == nil, let draft = model.offlineDraft else { return }
+        guard adding == nil, editingSelection == nil, editingExcludes == nil, history == nil,
+              let draft = model.offlineDraft else { return }
         model.offlineDraft = nil
         adding = draft
     }
@@ -108,13 +112,14 @@ struct OfflineView: View {
 private struct OfflineRow: View {
     @Environment(AppModel.self) private var model
     let item: OfflineItem
+    let onSelection: () -> Void
     let onExcludes: () -> Void
     let onHistory: () -> Void
     @State private var relocating = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: item.kind == .files ? "doc.on.doc" : (item.isVault ? "lock.shield" : "folder"))
+            Image(systemName: item.kind == .files ? "checklist" : (item.isVault ? "lock.shield" : "folder"))
                 .font(.title2)
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 32)
@@ -194,6 +199,7 @@ private struct OfflineRow: View {
     private var menuItems: some View {
         Button("Sync Now") { model.syncNow(item) }
         Button("Show in Finder") { model.showInFinder(item.storagePath) }
+        Button("Change Selection…", action: onSelection)
         Button("Change Location…") { relocate() }
         Button("Excludes & Advanced…", action: onExcludes)
         Button("Sync History…", action: onHistory)
@@ -268,9 +274,9 @@ struct AddOfflineSheet: View {
     let draft: OfflineDraft
 
     @State private var connectionId = ""
-    @State private var selection = OfflineSelection()
-    /// The folder chosen via "Change…"; CloudWire creates the offline folder inside it.
-    @State private var storageParent: String?
+    @State private var selection = OfflineTreeSelection()
+    /// The folder chosen via "Change…"; it becomes the Storage Location itself.
+    @State private var storageChoice: String?
     @State private var preflight: PreflightResult?
     @State private var checking = false
     @State private var creating = false
@@ -290,10 +296,11 @@ struct AddOfflineSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("① What should be available offline?").font(.headline)
                 if !connectionId.isEmpty {
-                    RemoteBrowser(connectionId: connectionId, selection: $selection)
-                        .frame(height: 260)
+                    OfflineTree(connectionId: connectionId, rootName: model.connectionName(connectionId),
+                                selection: $selection, locked: lockedPaths)
+                        .frame(height: 300)
                 }
-                selectionSummary
+                SelectionSummary(selection: selection)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -333,12 +340,11 @@ struct AddOfflineSheet: View {
             guard !prepared else { return }
             prepared = true
             connectionId = draft.connectionId.isEmpty ? (model.mountableConnections.first?.id ?? "") : draft.connectionId
-            selection = draft.remotePath.map { OfflineSelection(kind: draft.kind, remotePath: $0, files: draft.files) }
-                ?? OfflineSelection()
+            selection = OfflineTreeSelection(root: "", paths: draft.paths)
         }
         .onChange(of: connectionId) { old, _ in
-            // Paths belong to the previous Connection: start over at its root.
-            if !old.isEmpty { selection = OfflineSelection() }
+            // Paths belong to the previous Connection: start over with nothing selected.
+            if !old.isEmpty { selection = OfflineTreeSelection() }
         }
         .task(id: PreflightKey(connectionId: connectionId, target: selection.target, storagePath: storagePath)) {
             await runPreflight()
@@ -357,47 +363,23 @@ struct AddOfflineSheet: View {
 
     private struct PreflightKey: Equatable {
         let connectionId: String
-        let target: OfflineSelection.Target?
+        let target: OfflineTreeSelection.Target?
         let storagePath: String?
     }
 
-    /// The full storage path for a chosen parent folder, recomputed for every selection; nil leaves the
-    /// default (base folder/Connection/cloud path) to the Core.
-    private var storagePath: String? {
-        guard let storageParent, let target = selection.target else { return nil }
-        return (storageParent as NSString).appendingPathComponent(
-            target.storageFolderName(connectionName: model.connectionName(connectionId)))
+    /// Paths of the Connection's existing Offline Items; they cannot be selected again.
+    private var lockedPaths: [String] {
+        model.offlineItems.filter { $0.connectionId == connectionId }.flatMap(\.coveredPaths)
     }
+
+    /// The chosen Storage Location; nil leaves the default (base folder/Connection) to the Core.
+    private var storagePath: String? { storageChoice }
 
     private var storageLocationText: String {
-        if let path = storagePath ?? (selection.target == nil ? nil : preflight?.storagePath) {
+        if let path = storageChoice ?? preflight?.storagePath {
             return CorePaths.abbreviate(path)
         }
-        return String(localized: "Set after the selection (in \(CorePaths.abbreviate(storageParent ?? model.settings.baseFolder)))")
-    }
-
-    @ViewBuilder
-    private var selectionSummary: some View {
-        if let target = selection.target {
-            Label(summaryText(target), systemImage: target.kind == .files ? "doc.on.doc" : "folder")
-                .font(.callout)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        } else {
-            Text("Select a folder or files.").font(.callout).foregroundStyle(.secondary)
-        }
-    }
-
-    private func summaryText(_ target: OfflineSelection.Target) -> String {
-        let folderName = target.remotePath.isEmpty
-            ? model.connectionName(connectionId) : (target.remotePath as NSString).lastPathComponent
-        guard let files = target.files else {
-            return String(localized: "Selected: folder “\(folderName)”")
-        }
-        if files.count == 1 {
-            return String(localized: "Selected: “\(files[0])”")
-        }
-        return String(localized: "Selected: \(files.count) files in “\(folderName)”")
+        return String(localized: "Set after the selection (in \(CorePaths.abbreviate(model.settings.baseFolder)))")
     }
 
     private var canCreate: Bool {
@@ -431,12 +413,10 @@ struct AddOfflineSheet: View {
     }
 
     private func chooseLocation() {
-        let message = selection.target.map {
-            String(localized: "Choose the folder in which CloudWire creates “\($0.storageFolderName(connectionName: model.connectionName(connectionId)))” for the offline copy, for example on an external SSD.")
-        } ?? String(localized: "Choose the folder in which CloudWire creates the folder for the offline copy, for example on an external SSD.")
-        let start = storageParent ?? preflight.map { ($0.storagePath as NSString).deletingLastPathComponent }
-        if let chosen = Panels.chooseFolder(message: message, startingAt: start ?? model.settings.baseFolder) {
-            storageParent = chosen
+        let message = String(localized: "Choose the folder for the offline copy, for example on an external SSD. The selected items appear inside it with their cloud path.")
+        let start = storageChoice ?? preflight?.storagePath ?? model.settings.baseFolder
+        if let chosen = Panels.chooseFolder(message: message, startingAt: start) {
+            storageChoice = chosen
         }
     }
 
@@ -461,6 +441,179 @@ struct AddOfflineSheet: View {
                 askMerge = true
             } catch {
                 creating = false
+                let alert = ErrorText.alert(for: error)
+                self.error = "\(alert.title): \(alert.message)"
+            }
+        }
+    }
+}
+
+/// One line below the tree that names what is checked.
+private struct SelectionSummary: View {
+    let selection: OfflineTreeSelection
+
+    var body: some View {
+        if selection.isEmpty {
+            Text("Select folders or files.").font(.callout).foregroundStyle(.secondary)
+        } else {
+            Label(text, systemImage: "checklist")
+                .font(.callout)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    private var text: String {
+        if selection.paths == [""] {
+            return String(localized: "Selected: entire Connection")
+        }
+        if selection.paths.count == 1, let path = selection.paths.first {
+            return String(localized: "Selected: “\((path as NSString).lastPathComponent)”")
+        }
+        return String(localized: "Selected: \(selection.paths.count) items")
+    }
+}
+
+// MARK: - Change Selection
+
+struct EditOfflineSelectionSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let item: OfflineItem
+
+    @State private var selection: OfflineTreeSelection
+    @State private var preflight: PreflightResult?
+    @State private var checking = false
+    @State private var saving = false
+    @State private var error: String?
+    @State private var askLocalCopy = false
+
+    init(item: OfflineItem) {
+        self.item = item
+        _selection = State(initialValue: OfflineTreeSelection(item: item))
+    }
+
+    var body: some View {
+        SheetScaffold(title: String(localized: "Change Selection"), width: 640) {
+            VStack(alignment: .leading, spacing: 8) {
+                OfflineTree(connectionId: item.connectionId, rootName: rootName, selection: $selection,
+                            locked: lockedPaths)
+                    .frame(height: 300)
+                SelectionSummary(selection: selection)
+            }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    LabeledContent("Storage location") {
+                        Text(CorePaths.abbreviate(item.storagePath))
+                            .lineLimit(1).truncationMode(.middle)
+                            .foregroundStyle(.secondary)
+                    }
+                    if checking {
+                        ProgressView().controlSize(.small)
+                    } else if let preflight {
+                        Text("Additional cloud size \(Format.bytes(preflight.remoteBytes)) · free on disk \(Format.bytes(preflight.freeBytes))")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if !preflight.hasEnoughSpace {
+                            InlineError(message: String(localized: "Not enough free space: \(Format.bytes(Int64(Double(preflight.remoteBytes) * 1.1))) needed, \(Format.bytes(preflight.freeBytes)) available"))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            }
+            if let error { InlineError(message: error) }
+        } buttons: {
+            Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            Button("Save") { save() }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
+        }
+        .task(id: added.target) { await runPreflight() }
+        .confirmationDialog("Remove the local copy of deselected items?", isPresented: $askLocalCopy) {
+            Button("Move Local Copy to Trash") { apply(localCopy: .trash) }
+                .keyboardShortcut(.defaultAction)
+            Button("Keep Local Copy") { apply(localCopy: .keep) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("No longer synced: \(goneNames). The cloud is never touched.")
+        }
+    }
+
+    /// The Selection when the sheet opened.
+    private var original: OfflineTreeSelection { OfflineTreeSelection(item: item) }
+
+    /// Newly checked paths; only they are downloaded.
+    private var added: OfflineTreeSelection {
+        OfflineTreeSelection(root: item.remotePath, paths: selection.uncovered(by: original))
+    }
+
+    private var rootName: String {
+        item.remotePath.isEmpty
+            ? model.connectionName(item.connectionId) : (item.remotePath as NSString).lastPathComponent
+    }
+
+    /// Paths of the Connection's other Offline Items.
+    private var lockedPaths: [String] {
+        model.offlineItems.filter { $0.connectionId == item.connectionId && $0.id != item.id }.flatMap(\.coveredPaths)
+    }
+
+    private var goneNames: String {
+        original.uncovered(by: selection).map {
+            $0.isEmpty ? model.connectionName(item.connectionId) : ($0 as NSString).lastPathComponent
+        }
+        .joined(separator: ", ")
+    }
+
+    private var canSave: Bool {
+        guard !selection.isEmpty, selection != original, !saving, !checking else { return false }
+        if added.isEmpty { return true }
+        return preflight?.hasEnoughSpace == true
+    }
+
+    private func runPreflight() async {
+        guard let target = added.target else {
+            preflight = nil
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled else { return }
+        checking = true
+        error = nil
+        defer { checking = false }
+        do {
+            let result = try await model.client.offlinePreflight(
+                connectionId: item.connectionId, kind: target.kind, remotePath: target.remotePath,
+                files: target.files, storagePath: item.storagePath)
+            guard !Task.isCancelled else { return }
+            preflight = result
+        } catch is CancellationError {
+        } catch {
+            preflight = nil
+            let alert = ErrorText.alert(for: error)
+            self.error = "\(alert.title): \(alert.message)"
+        }
+    }
+
+    private func save() {
+        if original.uncovered(by: selection).isEmpty {
+            apply(localCopy: nil)
+        } else {
+            askLocalCopy = true
+        }
+    }
+
+    private func apply(localCopy: CoreClient.LocalCopyAction?) {
+        guard let target = selection.target else { return }
+        saving = true
+        error = nil
+        Task {
+            do {
+                let updated = try await model.client.setOfflineSelection(
+                    id: item.id, kind: target.kind, files: target.files, localCopy: localCopy)
+                model.updated(updated)
+                dismiss()
+            } catch {
+                saving = false
                 let alert = ErrorText.alert(for: error)
                 self.error = "\(alert.title): \(alert.message)"
             }

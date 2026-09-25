@@ -88,26 +88,6 @@ struct OfflineSelectionTests {
         #expect(target?.files == ["a.txt", "b.txt"])
     }
 
-    @Test("drafts prefill the selection and the browsed folder")
-    func drafts() {
-        let folder = OfflineSelection(kind: .folder, remotePath: "Docs/Photos", files: [])
-        #expect(folder.path == "Docs")
-        #expect(folder.target?.remotePath == "Docs/Photos")
-
-        let topLevel = OfflineSelection(kind: .folder, remotePath: "Docs", files: [])
-        #expect(topLevel.path == "")
-        #expect(topLevel.isFolderSelected("Docs"))
-
-        let files = OfflineSelection(kind: .files, remotePath: "Docs", files: ["b", "a"])
-        #expect(files.path == "Docs")
-        #expect(files.target?.files == ["a", "b"])
-
-        // A Vault or Mount root: the whole Connection is selected.
-        let root = OfflineSelection(kind: .folder, remotePath: "", files: [])
-        #expect(root.path == "")
-        #expect(root.target?.remotePath == "")
-    }
-
     @Test("single-item mode takes one folder or one file, never the root")
     func singleItem() {
         var selection = OfflineSelection.singleItem()
@@ -122,18 +102,5 @@ struct OfflineSelectionTests {
         selection.toggleFolder("Docs")
         #expect(selection.target?.kind == .folder)
         #expect(selection.target?.remotePath == "Docs")
-    }
-
-    @Test("the offline folder is named after the cloud folder, or the Connection for its root")
-    func storageFolderName() {
-        let folder = OfflineSelection(kind: .folder, remotePath: "Music/Projekte", files: [])
-        #expect(folder.target?.storageFolderName(connectionName: "Nextcloud") == "Projekte")
-
-        let files = OfflineSelection(kind: .files, remotePath: "Music/a:b", files: ["x.wav"])
-        #expect(files.target?.storageFolderName(connectionName: "Nextcloud") == "a-b")
-
-        let root = OfflineSelection(kind: .folder, remotePath: "", files: [])
-        #expect(root.target?.storageFolderName(connectionName: "NAS: Büro/2") == "NAS- Büro-2")
-        #expect(root.target?.storageFolderName(connectionName: " ") == "Cloud")
     }
 }

@@ -293,3 +293,33 @@ func TestMigrationCancelAndResult(t *testing.T) {
 		t.Fatalf("notifications %v", notes.params)
 	}
 }
+
+func TestEncryptExistingChecksTheOfflineSelection(t *testing.T) {
+	ctx := context.Background()
+	s := newMac(t)
+	s.Offline, s.notify = &fakeOffline{}, &recNotify{}
+	res, err := s.Create(ctx, CreateParams{ConnectionID: "p", Name: "Sel", Password: "correct horse", UnlockMode: "keychain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A Selection at the Connection root syncs only Music/B (and keeps Music as structure).
+	if err := s.st.InsertOfflineItem(store.OfflineItem{ID: "o1", ConnectionID: "p", Kind: "files",
+		Files: []string{"Music/B"}, StoragePath: "/tmp/cw-sel", State: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	encrypt := func(src string) error {
+		p := EncryptParams{ConnectionID: "p", Path: src, IsDir: true}
+		p.Target.VaultID = res.Vault.ID
+		_, err := s.EncryptExisting(ctx, p)
+		return err
+	}
+	for _, src := range []string{"Music", "Music/B", "Music/B/x"} {
+		var ae *api.Error
+		if err := encrypt(src); !errors.As(err, &ae) || ae.Code != "vault.sourceIsOffline" {
+			t.Errorf("%s: got %v, want vault.sourceIsOffline", src, err)
+		}
+	}
+	if err := encrypt("Music/A"); err != nil {
+		t.Fatalf("a sibling of the Selection: %v", err)
+	}
+}

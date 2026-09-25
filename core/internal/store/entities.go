@@ -37,7 +37,7 @@ type OfflineItem struct {
 	ConnectionID string         `json:"connectionId"`
 	Kind         string         `json:"kind"`
 	RemotePath   string         `json:"remotePath"`
-	Files        []string       `json:"files"`
+	Files        []string       `json:"files"` // kind files: selected paths relative to RemotePath (files or folders, may be nested)
 	StoragePath  string         `json:"storagePath"`
 	Excludes     []string       `json:"excludes"`
 	Advanced     map[string]any `json:"advanced"`
@@ -244,8 +244,8 @@ func (s *Store) InsertOfflineItem(it OfflineItem) error {
 
 // UpdateOfflineItem rewrites an Offline Item (except its remote ETag).
 func (s *Store) UpdateOfflineItem(it OfflineItem) error {
-	_, err := s.db.Exec(`UPDATE offline_items SET files=?,storage_path=?,excludes=?,advanced=?,needs_resync=?,
-last_sync_at=?,last_error=?,state=? WHERE id=?`, mustJSON(nonNilStrings(it.Files)), it.StoragePath,
+	_, err := s.db.Exec(`UPDATE offline_items SET kind=?,files=?,storage_path=?,excludes=?,advanced=?,needs_resync=?,
+last_sync_at=?,last_error=?,state=? WHERE id=?`, it.Kind, mustJSON(nonNilStrings(it.Files)), it.StoragePath,
 		mustJSON(nonNilStrings(it.Excludes)), mustJSON(nonNilMap(it.Advanced)), boolInt(it.NeedsResync),
 		nullInt(it.LastSyncAt), nullString(it.LastError), it.State, it.ID)
 	return err

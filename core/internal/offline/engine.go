@@ -875,7 +875,11 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 			e.notify.Notify(notify.KindConflict, map[string]any{"itemId": it.ID, "itemName": name, "files": cf})
 		}
 		if e.Mounts != nil {
-			go e.Mounts.Forget(it.ConnectionID, it.RemotePath)
+			go func(connID string, dirs []string) {
+				for _, d := range dirs {
+					e.Mounts.Forget(connID, d)
+				}
+			}(it.ConnectionID, changedDirs(it))
 		}
 		if rt.runETag != "" {
 			if err := e.st.SetOfflineETag(it.ID, rt.runETag); err != nil {

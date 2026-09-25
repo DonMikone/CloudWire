@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -146,7 +145,7 @@ func (e *Engine) localChange(id, rel string, now time.Time) {
 	if err != nil || rel == "" || Excluded(rel, it.Excludes) {
 		return
 	}
-	if it.Kind == "files" && !slices.Contains(it.Files, strings.SplitN(rel, "/", 2)[0]) {
+	if !Includes(it, rel) {
 		return
 	}
 	if e.cur != nil && e.cur.q.itemID == id {
@@ -229,7 +228,7 @@ func (e *Engine) onRemoteChange(id, p string) {
 	if err != nil {
 		return
 	}
-	if it.Kind == "files" && !slices.Contains(it.Files, strings.SplitN(strings.Trim(p, "/"), "/", 2)[0]) {
+	if !Includes(it, strings.Trim(p, "/")) {
 		return
 	}
 	rt.due = minTime(rt.due, now)

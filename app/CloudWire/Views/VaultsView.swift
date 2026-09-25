@@ -225,8 +225,7 @@ private struct VaultRow: View {
             Button("Mount as Drive") { mountVault() }
                 .disabled(!vault.unlocked)
             Button("Make Available Offline") {
-                model.offlineDraft = OfflineDraft(connectionId: vault.vaultConnectionId, remotePath: "",
-                                                  kind: .folder, files: [])
+                model.offlineDraft = OfflineDraft(connectionId: vault.vaultConnectionId, paths: [""])
                 model.selection = .offline
             }
             .disabled(!vault.unlocked)

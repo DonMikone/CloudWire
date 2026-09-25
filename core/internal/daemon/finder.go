@@ -3,11 +3,11 @@ package daemon
 import (
 	"context"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/msg"
+	"github.com/DonMikone/CloudWire/core/internal/offline"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/sharing"
 )
@@ -67,8 +67,8 @@ func (c *Core) resolvePath(local string) (Resolved, error) {
 			rel = ""
 		}
 		rel = filepath.ToSlash(rel)
-		if it.Kind == "files" && !slices.Contains(it.Files, strings.SplitN(rel, "/", 2)[0]) {
-			continue // only the listed files belong to a files item
+		if !offline.Includes(it, rel) {
+			continue // a files item owns only its Selection and the parent folders
 		}
 		best, bestLen = Resolved{ConnectionID: it.ConnectionID, RemotePath: joinRemote(it.RemotePath, rel),
 			Context: "offline", ItemID: it.ID}, len(it.StoragePath)

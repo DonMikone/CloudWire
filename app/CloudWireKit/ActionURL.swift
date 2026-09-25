@@ -20,7 +20,7 @@ public struct ActionURL: Sendable, Hashable {
             }
         }
 
-        /// Whether the action takes several paths (files of one folder); all others act on one item.
+        /// Whether the action takes several paths (any items of one Connection); all others act on one item.
         public var acceptsSeveralPaths: Bool { self == .makeOffline }
     }
 

@@ -1,9 +1,8 @@
 import Foundation
 
 /// What a sheet has picked while browsing a Connection: exactly one folder, or files of one folder,
-/// never both. "Make Available Offline" allows several files and the Connection root; encrypting
-/// (`singleItem()`) takes exactly one folder or one file below the root. Paths are relative to the
-/// Connection root ("" = root).
+/// never both. Encrypting (`singleItem()`) takes exactly one folder or one file below the root.
+/// Paths are relative to the Connection root ("" = root).
 public struct OfflineSelection: Sendable, Hashable {
     /// The item a selection maps to.
     public struct Target: Sendable, Hashable {
@@ -12,17 +11,6 @@ public struct OfflineSelection: Sendable, Hashable {
         public let remotePath: String
         /// Sorted file names in `remotePath` for `.files`, `nil` for `.folder`.
         public let files: [String]?
-
-        /// The folder CloudWire creates for the offline copy inside a chosen parent folder: the cloud
-        /// folder's name, or the Connection's name for its root (cleaned like the Core's default path).
-        public func storageFolderName(connectionName: String) -> String {
-            guard let last = remotePath.split(separator: "/").last else {
-                let name = connectionName.trimmingCharacters(in: .whitespaces)
-                    .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-                return name.isEmpty || name == "." || name == ".." ? "Cloud" : name
-            }
-            return last.replacingOccurrences(of: ":", with: "-")
-        }
     }
 
     /// The folder being browsed.
@@ -42,18 +30,6 @@ public struct OfflineSelection: Sendable, Hashable {
     public init(path: String = "") {
         self.path = path
         filesFolder = path
-    }
-
-    /// Prefill from a draft: a folder ("" = the Connection root) is selected with its parent open, so
-    /// the selected row is visible; files are checked inside their folder.
-    public init(kind: OfflineKind, remotePath: String, files: [String]) {
-        if kind == .files {
-            self.init(path: remotePath)
-            self.files = Set(files)
-        } else {
-            self.init(path: remotePath.split(separator: "/").dropLast().joined(separator: "/"))
-            folder = remotePath
-        }
     }
 
     /// One folder or one file, never the Connection root (encrypting existing data).
