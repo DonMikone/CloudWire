@@ -13,6 +13,7 @@ import (
 	"github.com/rclone/rclone/fs/cache"
 	"github.com/rclone/rclone/fs/config/obscure"
 
+	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/sharing/nextcloud"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
@@ -145,7 +146,7 @@ func (e *Engine) localChange(id, rel string, now time.Time) {
 	if err != nil || rel == "" || Excluded(rel, it.Excludes) {
 		return
 	}
-	if !Includes(it, rel) {
+	if !Includes(it, rel) && !e.adoptableLocked(it, rel) {
 		return
 	}
 	if e.cur != nil && e.cur.q.itemID == id {
@@ -157,6 +158,26 @@ func (e *Engine) localChange(id, rel string, now time.Time) {
 	rt.quietUntil = now.Add(quiet)
 	rt.due = minTime(rt.due, rt.quietUntil)
 	e.poke()
+}
+
+// adoptableLocked reports whether a local change outside a files item's
+// Selection creates something that joins it after the next run.
+func (e *Engine) adoptableLocked(it store.OfflineItem, rel string) bool {
+	top := firstUnselected(it.Files, rel)
+	if top == "" || neverAdopted(top, it.Excludes, ConflictMarker(e.label())) {
+		return false
+	}
+	items, err := e.st.OfflineItems()
+	if err != nil {
+		return false
+	}
+	abs := filepath.Join(it.StoragePath, top)
+	for _, o := range items {
+		if o.ID != it.ID && (paths.IsWithin(abs, o.StoragePath) || paths.IsWithin(o.StoragePath, abs)) {
+			return false
+		}
+	}
+	return true
 }
 
 // startRemote sets up remote change detection for an item.

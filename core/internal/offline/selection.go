@@ -3,6 +3,7 @@ package offline
 import (
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -217,4 +218,85 @@ func removeEmptyParents(storage, p string, next, roots []string) {
 			return
 		}
 	}
+}
+
+// partialFolders returns the partially selected folders of a Selection: the
+// root and every parent folder of an entry, sorted.
+func partialFolders(entries []string) []string {
+	out := []string{""}
+	for _, e := range entries {
+		for d := path.Dir(e); d != "." && d != "/" && d != ""; d = path.Dir(d) {
+			out = append(out, d)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// firstUnselected returns the outermost part of rel that the Selection does
+// not sync (a new child of a partially selected folder), or "" if rel is synced.
+func firstUnselected(entries []string, rel string) string {
+	for i := 0; i <= len(rel); i++ {
+		if i == len(rel) || rel[i] == '/' {
+			if p := rel[:i]; !relevant(entries, p) {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// neverAdopted reports whether a local path never joins a Selection on its
+// own: excluded, system or temporary files, Conflict Copies and Vault folders.
+func neverAdopted(rel string, excludes []string, marker string) bool {
+	name := path.Base(rel)
+	return Excluded(rel, excludes) || name == ".localized" || name == "Icon\r" ||
+		strings.HasPrefix(name, "~$") || strings.HasPrefix(name, ".~lock.") ||
+		strings.Contains(name, marker) || strings.HasSuffix(name, vaultFolderSuffix)
+}
+
+// localAdditions returns what was created locally inside the partially
+// selected folders of a files item: the children that the Selection does not
+// sync, except ignored names and the Storage Locations of other items (roots).
+func localAdditions(it store.OfflineItem, marker string, roots []string) ([]string, error) {
+	if it.Kind != "files" {
+		return nil, nil
+	}
+	var out []string
+	for _, d := range partialFolders(it.Files) {
+		names, err := os.ReadDir(filepath.Join(it.StoragePath, d))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range names {
+			rel := joinRemote(d, n.Name())
+			if relevant(it.Files, rel) || neverAdopted(rel, it.Excludes, marker) {
+				continue
+			}
+			abs := filepath.Join(it.StoragePath, rel)
+			if slices.ContainsFunc(roots, func(r string) bool { return paths.IsWithin(abs, r) || paths.IsWithin(r, abs) }) {
+				continue
+			}
+			out = append(out, rel)
+		}
+	}
+	return out, nil
+}
+
+// missingLocal returns the entries that no longer exist below storage. After
+// a successful sync they are gone in the cloud as well.
+func missingLocal(storage string, entries []string) []string {
+	var out []string
+	for _, e := range entries {
+		if e == "" {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(storage, e)); errors.Is(err, os.ErrNotExist) {
+			out = append(out, e)
+		}
+	}
+	return out
 }

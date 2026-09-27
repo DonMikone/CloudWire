@@ -346,6 +346,10 @@ public struct CoreText: Sendable, Hashable {
             guard let name = a["name"] else { return nil }
             return String(localized: "Selection of “\(name)” changed", bundle: a.bundle)
         },
+        "offline.selectionPruned": { a in
+            guard let count = a.int("count"), let name = a["name"] else { return nil }
+            return String(localized: "Removed \(count) deleted items from the Selection of “\(name)”", bundle: a.bundle)
+        },
         "offline.settingsChanged": { a in
             guard let name = a["name"] else { return nil }
             return String(localized: "Settings of “\(name)” changed", bundle: a.bundle)

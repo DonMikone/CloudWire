@@ -486,7 +486,7 @@ struct EditOfflineSelectionSheet: View {
     @State private var checking = false
     @State private var saving = false
     @State private var error: String?
-    @State private var askLocalCopy = false
+    @State private var confirmTrash = false
 
     init(item: OfflineItem) {
         self.item = item
@@ -529,10 +529,9 @@ struct EditOfflineSelectionSheet: View {
                 .disabled(!canSave)
         }
         .task(id: added.target) { await runPreflight() }
-        .confirmationDialog("Remove the local copy of deselected items?", isPresented: $askLocalCopy) {
-            Button("Move Local Copy to Trash") { apply(localCopy: .trash) }
+        .confirmationDialog("Remove the local copy of deselected items?", isPresented: $confirmTrash) {
+            Button("Move Local Copy to Trash") { apply() }
                 .keyboardShortcut(.defaultAction)
-            Button("Keep Local Copy") { apply(localCopy: .keep) }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("No longer synced: \(goneNames). The cloud is never touched.")
@@ -596,20 +595,22 @@ struct EditOfflineSelectionSheet: View {
 
     private func save() {
         if original.uncovered(by: selection).isEmpty {
-            apply(localCopy: nil)
+            apply()
         } else {
-            askLocalCopy = true
+            confirmTrash = true
         }
     }
 
-    private func apply(localCopy: CoreClient.LocalCopyAction?) {
+    /// Deselected local parts go to the Trash: kept in a partially selected
+    /// folder, they would join the Selection again.
+    private func apply() {
         guard let target = selection.target else { return }
         saving = true
         error = nil
         Task {
             do {
                 let updated = try await model.client.setOfflineSelection(
-                    id: item.id, kind: target.kind, files: target.files, localCopy: localCopy)
+                    id: item.id, kind: target.kind, files: target.files)
                 model.updated(updated)
                 dismiss()
             } catch {

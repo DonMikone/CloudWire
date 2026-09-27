@@ -844,13 +844,20 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		rt.retryAt = time.Time{}
 		rt.lastNotifiedEr = false
 		// Local changes during the run that were not caused by the sync itself.
-		if leftover := foreignChanges(rt.duringRun, r.files); len(leftover) > 0 {
+		leftover := foreignChanges(rt.duringRun, r.files)
+		if len(leftover) > 0 {
 			for _, rel := range leftover {
 				rt.pendingPaths[filepath.Join(it.StoragePath, rel)] = true
 			}
 			rt.due = minTime(rt.due, now.Add(time.Duration(e.settings().QuietPeriodSeconds)*time.Second))
 		}
 		rt.duringRun = map[string]bool{}
+		// Prune deleted entries only when nothing changed locally during the
+		// run and the Selection did not change meanwhile (a new entry is not
+		// downloaded yet): only then does the local tree mirror the cloud.
+		if e.adjustSelectionLocked(&it, len(leftover) == 0 && r.resyncGen == rt.resyncGen) {
+			rt.due = now
+		}
 		if err := e.st.UpdateOfflineItem(it); err != nil {
 			slog.Error("offline: update item", "err", err)
 		}

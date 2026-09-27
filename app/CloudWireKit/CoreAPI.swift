@@ -194,14 +194,10 @@ extension CoreClient {
                            as: EmptyResult.self)
     }
 
-    /// Replaces an item's Selection; `localCopy` decides what happens to deselected local parts.
-    public func setOfflineSelection(id: String, kind: OfflineKind, files: [String]?,
-                                    localCopy: LocalCopyAction?) async throws -> OfflineItem
-    {
+    /// Replaces an item's Selection; deselected local parts go to the Trash.
+    public func setOfflineSelection(id: String, kind: OfflineKind, files: [String]?) async throws -> OfflineItem {
         try await call("offline.setSelection",
-                       params: JSONValue.params([
-                           "id": id, "kind": kind.rawValue, "files": files, "localCopy": localCopy?.rawValue,
-                       ]))
+                       params: JSONValue.params(["id": id, "kind": kind.rawValue, "files": files]))
     }
 
     /// Syncs one item now, or all items when `id` is nil. Ignores Pause Rules.

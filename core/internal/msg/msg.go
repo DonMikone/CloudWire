@@ -132,6 +132,7 @@ var templates = map[string]string{
 	"offline.added":                `Offline Item "{name}" added at {path}`,
 	"offline.filesAdded":           `Added {count} item(s) to Offline Item "{name}"`,
 	"offline.selectionChanged":     `Selection of "{name}" changed`,
+	"offline.selectionPruned":      `Removed {count} deleted item(s) from the Selection of "{name}"`,
 	"offline.settingsChanged":      `Settings of "{name}" changed`,
 	"offline.movedWithLeftovers":   `Moved "{name}", but some files could not be removed from {path}`,
 	"offline.moved":                `Moved "{name}" to {path}`,

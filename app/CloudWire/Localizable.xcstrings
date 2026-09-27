@@ -5473,6 +5473,47 @@
         }
       }
     },
+    "Removed %lld deleted items from the Selection of “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld gelöschtes Element aus der Auswahl von „%2$@“ entfernt"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld gelöschte Elemente aus der Auswahl von „%2$@“ entfernt"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removed %lld deleted item from the Selection of “%@”"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removed %lld deleted items from the Selection of “%@”"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Removed from CloudWire; still active at the provider – please remove it on the web." : {
       "localizations" : {
         "de" : {

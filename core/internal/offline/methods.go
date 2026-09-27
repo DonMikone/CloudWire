@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -421,14 +422,17 @@ func (e *Engine) Relocate(ctx context.Context, id, newPath string) (DTO, error) 
 
 // SelectionParams are offline.setSelection params.
 type SelectionParams struct {
-	ID        string   `json:"id"`
-	Kind      string   `json:"kind"`
-	Files     []string `json:"files"`
-	LocalCopy string   `json:"localCopy"`
+	ID    string   `json:"id"`
+	Kind  string   `json:"kind"`
+	Files []string `json:"files"`
 }
 
-// SetSelection replaces an item's Selection; deselected local parts go to the
-// Trash or stay. The cloud is never touched: the new filters exclude the
+// moveToTrash moves a path into the user's Trash (replaced in tests).
+var moveToTrash = platform.MoveToTrash
+
+// SetSelection replaces an item's Selection and moves the deselected local
+// parts to the Trash: kept in a partially selected folder, they would join the
+// Selection again. The cloud is never touched: the new filters exclude the
 // deselected paths before the next run, so their local removal is not synced.
 func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, error) {
 	it, err := e.Get(p.ID)
@@ -446,9 +450,6 @@ func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, erro
 		return e.dtoLocked(it), nil
 	}
 	gone := uncovered(old, next)
-	if len(gone) > 0 && p.LocalCopy != "trash" && p.LocalCopy != "keep" {
-		return DTO{}, api.Invalid("localCopy must be trash or keep")
-	}
 	existing, err := e.st.OfflineItems()
 	if err != nil {
 		return DTO{}, err
@@ -459,11 +460,9 @@ func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, erro
 	if _, err := validateNew(probe, others, e.mountPoints(), e.paths); err != nil {
 		return DTO{}, err
 	}
-	var targets []string
-	if p.LocalCopy == "trash" {
-		if targets, err = deselectedLocal(it.StoragePath, gone, next); err != nil {
-			return DTO{}, api.Fail("offline.locationMissing", msg.New("offline.trashFailed", "detail", err))
-		}
+	targets, err := deselectedLocal(it.StoragePath, gone, next)
+	if err != nil {
+		return DTO{}, api.Fail("offline.locationMissing", msg.New("offline.trashFailed", "detail", err))
 	}
 	e.stopItem(it.ID)
 	e.mu.Lock()
@@ -482,7 +481,7 @@ func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, erro
 	}
 	var errs []error
 	for _, t := range targets {
-		if err := platform.MoveToTrash(t); err != nil {
+		if err := moveToTrash(t); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -493,6 +492,65 @@ func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, erro
 	}
 	e.log.Info("offline", it.ID, msg.New("offline.selectionChanged", "name", ItemName(fresh)), gone)
 	return e.restartItem(fresh), nil
+}
+
+// adjustSelectionLocked runs after a successful sync of a files item: what
+// was created locally in a partially selected folder joins the Selection, and
+// with prune, entries that no longer exist (on either side) leave it. It
+// stores the new filters, requests a resync and reports whether it changed it.
+func (e *Engine) adjustSelectionLocked(it *store.OfflineItem, prune bool) bool {
+	if it.Kind != "files" {
+		return false
+	}
+	existing, err := e.st.OfflineItems()
+	if err != nil {
+		return false
+	}
+	others := slices.DeleteFunc(existing, func(x store.OfflineItem) bool { return x.ID == it.ID })
+	found, err := localAdditions(*it, ConflictMarker(e.label()), storageRoots(others))
+	if err != nil {
+		slog.Warn("offline: scan local additions", "item", it.ID, "err", err)
+	}
+	var added []string
+	for _, rel := range found {
+		probe := *it
+		applySelection(&probe, []string{rel})
+		if !slices.ContainsFunc(others, func(o store.OfflineItem) bool { return remoteOverlap(probe, o) }) {
+			added = append(added, rel)
+		}
+	}
+	var removed []string
+	if prune {
+		removed = missingLocal(it.StoragePath, it.Files)
+	}
+	kept := slices.DeleteFunc(slices.Clone(it.Files), func(f string) bool { return slices.Contains(removed, f) })
+	if len(kept) == 0 && len(added) == 0 {
+		removed = nil // a Selection is never empty
+		kept = it.Files
+	}
+	if len(added) == 0 && len(removed) == 0 {
+		return false
+	}
+	next := kept
+	if len(added) > 0 {
+		next = mergeSelections(kept, added)
+	}
+	probe := *it
+	applySelection(&probe, next)
+	if err := WriteFilters(e.paths, probe); err != nil {
+		slog.Error("offline: write filters", "item", it.ID, "err", err)
+		return false
+	}
+	*it = probe
+	e.requestResyncLocked(it)
+	name := ItemName(*it)
+	if len(added) > 0 {
+		e.log.Info("offline", it.ID, msg.New("offline.filesAdded", "count", len(added), "name", name), added)
+	}
+	if len(removed) > 0 {
+		e.log.Info("offline", it.ID, msg.New("offline.selectionPruned", "count", len(removed), "name", name), removed)
+	}
+	return true
 }
 
 func (e *Engine) restartItem(it store.OfflineItem) DTO {
@@ -683,7 +741,7 @@ func (e *Engine) Remove(ctx context.Context, id, localCopy string) error {
 			if _, err := os.Lstat(t); err != nil {
 				continue
 			}
-			if err := platform.MoveToTrash(t); err != nil {
+			if err := moveToTrash(t); err != nil {
 				e.restartItem(it)
 				return api.Fail("offline.locationMissing", msg.New("offline.trashFailed", "detail", err))
 			}

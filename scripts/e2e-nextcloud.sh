@@ -193,13 +193,25 @@ TP="$TROOT/Tree/123"
 tree_synced() { [ -f "$TP/B/b.txt" ] && [ -f "$TP/C/c.txt" ]; }
 wait_for 60 "checked folders synced at their cloud path" tree_synced
 [ ! -e "$TP/A" ] && [ ! -e "$TP/readme.txt" ] && ok "unchecked folder and parent files stay in the cloud" || fail "unselected items synced"
-rpc offline.setSelection "{\"id\":\"$TID\",\"kind\":\"files\",\"files\":[\"Tree/123/B\"],\"localCopy\":\"keep\"}" | jq -e '.files == ["Tree/123/B"]' >/dev/null \
+rpc offline.setSelection "{\"id\":\"$TID\",\"kind\":\"files\",\"files\":[\"Tree/123/B\"]}" | jq -e '.files == ["Tree/123/B"]' >/dev/null \
   && ok "selection narrowed" || fail "setSelection"
-resynced() { rpc offline.list | jq -e ".[] | select(.id==\"$TID\") | .state == \"idle\" and .needsResync == false"; }
+resynced() { rpc offline.list | jq -e ".[] | select(.id==\"$TID\") | .state == \"idle\" and .needsResync == false" >/dev/null; }
 wait_for 60 "resync after the selection change" resynced
 exists_remote Tree/123/C/c.txt && ok "deselected folder untouched in the cloud" || fail "deselected folder deleted in the cloud"
-[ -f "$TP/C/c.txt" ] && ok "deselected local copy kept" || fail "kept local copy removed"
+[ ! -e "$TP/C" ] && ok "deselected local copy moved to the Trash" || fail "deselected local copy left"
 [ "$(cat "$SP/Mix.wav")" = "local edit!" ] && exists_remote Music/local-new.wav && ok "nested folder item untouched" || fail "nested folder item changed"
+tree_files() { rpc offline.list | jq -c ".[] | select(.id==\"$TID\") | .files"; }
+# Created locally in a partially selected folder: joins the Selection and is uploaded.
+mkdir -p "$TP/New" && echo n > "$TP/New/n.txt" && echo m > "$TP/New/m.txt"
+adopted() { exists_remote Tree/123/New/n.txt && [ "$(tree_files)" = '["Tree/123/B","Tree/123/New"]' ]; }
+wait_for 90 "local folder in a partial folder adopted and uploaded" adopted
+wait_for 60 "resync after adopting" resynced
+# A local rename of a checked folder is a rename in the cloud; the old entry leaves the Selection.
+mv "$TP/B" "$TP/B2"
+renamed() { exists_remote Tree/123/B2/b.txt && ! exists_remote Tree/123/B/b.txt && [ "$(tree_files)" = '["Tree/123/B2","Tree/123/New"]' ]; }
+wait_for 90 "renamed checked folder" renamed
+wait_for 60 "resync after the rename" resynced
+[ ! -e "$TP/A" ] && [ ! -e "$TP/readme.txt" ] && [ ! -e "$TP/C" ] && ok "cloud-only parts of partial folders stay in the cloud" || fail "cloud-only parts downloaded"
 
 log "Shares"
 rpc shares.capabilities "{\"connectionId\":\"$CID\"}" | jq -e '.publicLink and .internalLink and .userShare and .emailShare and .manage' >/dev/null && ok "capabilities" || fail "capabilities"

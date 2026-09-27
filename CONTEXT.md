@@ -17,7 +17,7 @@ A Selection of one Connection's folders and files, kept as real local files at t
 _Avoid_: Pinned file, Cache, Selective sync
 
 **Selection** (UI: Auswahl):
-The checked folders and files of an Offline Item. A checked folder includes everything below it, including later additions; parent folders of checked items are kept only as structure.
+The checked folders and files of an Offline Item. A checked folder includes everything below it, including later additions. Parent folders of checked items are partially selected: what is created locally in them joins the Selection; what appears only in the cloud stays cloud-only.
 _Avoid_: Include list, Filter
 
 **Storage Location** (UI: Speicherort):

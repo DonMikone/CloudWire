@@ -68,8 +68,7 @@ enum SnapshotDialogs {
                   trigger: "EditOfflineSelectionSheet: „Save“, wenn Elemente abgewählt wurden",
                   title: String(localized: "Remove the local copy of deselected items?"),
                   message: String(localized: "No longer synced: \("B, C"). The cloud is never touched."),
-                  buttons: [String(localized: "Move Local Copy to Trash") + " (Standard ⏎)",
-                            String(localized: "Keep Local Copy"), cancel]),
+                  buttons: [String(localized: "Move Local Copy to Trash") + " (Standard ⏎)", cancel]),
             Entry(file: "Views/SharesView.swift", anchor: "Delete this share?",
                   trigger: "Freigaben: Papierkorb-Button einer Freigabe",
                   title: String(localized: "Delete the share with \("Anna Berg")?") + " | "

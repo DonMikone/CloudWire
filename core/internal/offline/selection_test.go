@@ -163,3 +163,61 @@ func TestRemoveEmptyParents(t *testing.T) {
 		t.Fatalf("nested Storage Location removed: %v", err)
 	}
 }
+
+func TestPartialFoldersAndFirstUnselected(t *testing.T) {
+	entries := []string{"M/123/B", "M/123/C", "top.txt"}
+	if got := partialFolders(entries); !slices.Equal(got, []string{"", "M", "M/123"}) {
+		t.Fatalf("partial folders %q", got)
+	}
+	for rel, want := range map[string]string{
+		"M/123/B/x.wav":  "",
+		"M/123":          "",
+		"M/123/New/a/b":  "M/123/New",
+		"M/readme.txt":   "M/readme.txt",
+		"Other/deep/one": "Other",
+	} {
+		if got := firstUnselected(entries, rel); got != want {
+			t.Errorf("firstUnselected(%q) = %q, want %q", rel, got, want)
+		}
+	}
+}
+
+func TestNeverAdopted(t *testing.T) {
+	excludes := store.DefaultSettings().DefaultExcludes
+	marker := ConflictMarker("Konflikt")
+	for rel, want := range map[string]bool{
+		"M/New":                              false,
+		"M/Report.docx":                      false,
+		"M/.DS_Store":                        true,
+		"M/._Report.docx":                    true,
+		"M/~$Report.docx":                    true,
+		"M/.~lock.Report.odt#":               true,
+		"M/Mix.Konflikt 2026-09-23 1200.wav": true,
+		"M/Safe.cwvault":                     true,
+	} {
+		if got := neverAdopted(rel, excludes, marker); got != want {
+			t.Errorf("neverAdopted(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
+func TestLocalAdditionsAndMissingLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, "M/123/B/b", "M/123/New/n", "M/123/A.txt", "M/.DS_Store", "Other/o", "Nested/x")
+	it := store.OfflineItem{Kind: "files", Files: []string{"M/123/B", "M/123/C"}, StoragePath: dir,
+		Excludes: store.DefaultSettings().DefaultExcludes}
+	got, err := localAdditions(it, ConflictMarker("Konflikt"), []string{filepath.Join(dir, "Nested")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"M/123/A.txt", "M/123/New", "Other"}) {
+		t.Fatalf("additions %q", got)
+	}
+	if got, _ := localAdditions(store.OfflineItem{Kind: "folder", StoragePath: dir}, "x", nil); got != nil {
+		t.Fatalf("folder item additions %q", got)
+	}
+	if got := missingLocal(dir, it.Files); !slices.Equal(got, []string{"M/123/C"}) {
+		t.Fatalf("missing %q", got)
+	}
+}

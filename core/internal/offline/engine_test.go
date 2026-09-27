@@ -3,7 +3,6 @@ package offline
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,9 +12,9 @@ import (
 	"time"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
-	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
+	"github.com/DonMikone/CloudWire/core/internal/platform"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
@@ -580,17 +579,14 @@ func TestNoRunsWhileRelocatingOrRemoving(t *testing.T) {
 	}
 }
 
-func TestSetSelectionKeep(t *testing.T) {
+func TestSetSelectionTrashesDeselected(t *testing.T) {
 	h := newHarness(t)
 	a := h.addItem("a")
 	writeFiles(t, a.StoragePath, "x/1.txt", "y/2.txt")
-	params := SelectionParams{ID: "a", Kind: "files", Files: []string{"x/"}}
-	var inv api.InvalidParams
-	if _, err := h.e.SetSelection(context.Background(), params); !errors.As(err, &inv) {
-		t.Fatalf("deselecting without a localCopy choice: %v", err)
-	}
-	params.LocalCopy = "keep"
-	if _, err := h.e.SetSelection(context.Background(), params); err != nil {
+	var trashed []string
+	moveToTrash = func(p string) error { trashed = append(trashed, p); return os.RemoveAll(p) }
+	t.Cleanup(func() { moveToTrash = platform.MoveToTrash })
+	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "a", Kind: "files", Files: []string{"x/"}}); err != nil {
 		t.Fatal(err)
 	}
 	it := h.state("a")
@@ -601,19 +597,108 @@ func TestSetSelectionKeep(t *testing.T) {
 	if !strings.Contains(string(filters), "+ /x\n+ /x/**\n- **\n") {
 		t.Fatalf("filters %q", filters)
 	}
-	if _, err := os.Stat(filepath.Join(a.StoragePath, "y/2.txt")); err != nil {
-		t.Fatalf("kept local copy is gone: %v", err)
+	if !slices.Equal(trashed, []string{filepath.Join(a.StoragePath, "y")}) {
+		t.Fatalf("trashed %v", trashed)
 	}
-	got, _ := h.e.StatusForPaths([]string{filepath.Join(a.StoragePath, "x/1.txt"), filepath.Join(a.StoragePath, "y/2.txt")})
-	if got[filepath.Join(a.StoragePath, "x/1.txt")] != "synced" || got[filepath.Join(a.StoragePath, "y/2.txt")] != "none" {
-		t.Fatalf("badges %v", got)
+	if _, err := os.Stat(filepath.Join(a.StoragePath, "x/1.txt")); err != nil {
+		t.Fatalf("selected local copy gone: %v", err)
 	}
-	// Widening back to the whole root needs no choice: nothing is deselected.
+	// Widening back to the whole root trashes nothing.
 	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "a", Kind: "folder"}); err != nil {
 		t.Fatal(err)
 	}
-	if it := h.state("a"); it.Kind != "folder" || len(it.Files) != 0 {
-		t.Fatalf("widened item %+v", it)
+	if it := h.state("a"); it.Kind != "folder" || len(it.Files) != 0 || len(trashed) != 1 {
+		t.Fatalf("widened item %+v, trashed %v", it, trashed)
+	}
+}
+
+func TestLocalAdditionsJoinTheSelection(t *testing.T) {
+	h := newHarness(t)
+	inner := h.addItem("in") // folder item at store/in: another item's Storage Location
+	it := store.OfflineItem{ID: "t", ConnectionID: "c1", Kind: "files", Files: []string{"T/B", "T/C"},
+		StoragePath: filepath.Join(h.dir, "store"), Excludes: store.DefaultSettings().DefaultExcludes, State: StateIdle}
+	if err := h.st.InsertOfflineItem(it); err != nil {
+		t.Fatal(err)
+	}
+	h.e.mu.Lock()
+	h.e.itemRT("t")
+	h.e.mu.Unlock()
+	writeFiles(t, it.StoragePath, "T/B/b", "T/New/n", "T/.DS_Store", "T/~$Doc.docx", "T/x.Konflikt 2026-09-23 1200.txt", "top.txt")
+	writeFiles(t, inner.StoragePath, "song.wav")
+
+	// The watcher starts a run for a new child of a partial folder only.
+	h.e.localChange("t", "T/New/n", h.now)
+	h.e.localChange("t", "T/~$Doc.docx", h.now)
+	h.e.localChange("t", "in/song.wav", h.now)
+	pending := h.e.rt["t"].pendingPaths
+	if !pending[filepath.Join(it.StoragePath, "T/New/n")] || len(pending) != 1 {
+		t.Fatalf("pending %v", pending)
+	}
+
+	// After a successful run: T/New and top.txt join, the missing T/C leaves.
+	h.e.rt["t"].due = h.now
+	h.now = h.now.Add(time.Hour)
+	h.step()
+	jobs := h.started()
+	if len(jobs) != 1 || jobs[0].job.ID != "t" {
+		t.Fatalf("jobs %+v", jobs)
+	}
+	jobs[0].complete(sv.StatusOK, "")
+	h.waitIdle()
+	got := h.state("t")
+	if !slices.Equal(got.Files, []string{"T/B", "T/New", "top.txt"}) || !got.NeedsResync {
+		t.Fatalf("adjusted item %+v", got)
+	}
+	filters, _ := os.ReadFile(paths.ForHome(h.dir).FiltersFile("t"))
+	if !strings.Contains(string(filters), "+ /T/New/**\n") || strings.Contains(string(filters), "/T/C") {
+		t.Fatalf("filters %q", filters)
+	}
+	if h.e.rt["t"].due != h.now {
+		t.Fatal("the resync must run right away")
+	}
+
+	// Nothing new: the Selection stays; it never becomes empty.
+	for _, p := range []string{"T", "top.txt"} {
+		_ = os.RemoveAll(filepath.Join(it.StoragePath, p))
+	}
+	h.e.mu.Lock()
+	fresh := h.state("t")
+	changed := h.e.adjustSelectionLocked(&fresh, true)
+	h.e.mu.Unlock()
+	if changed || len(fresh.Files) != 3 {
+		t.Fatalf("emptied Selection: changed=%v %+v", changed, fresh)
+	}
+}
+
+func TestNoPruneAfterSelectionChangedDuringRun(t *testing.T) {
+	h := newHarness(t)
+	it := store.OfflineItem{ID: "t", ConnectionID: "c1", Kind: "files", Files: []string{"a.wav"},
+		StoragePath: filepath.Join(h.dir, "store"), Excludes: store.DefaultSettings().DefaultExcludes, State: StateIdle}
+	if err := h.st.InsertOfflineItem(it); err != nil {
+		t.Fatal(err)
+	}
+	writeFiles(t, it.StoragePath, "a.wav")
+	h.e.mu.Lock()
+	h.e.itemRT("t").due = h.now
+	h.e.mu.Unlock()
+	h.step()
+	jobs := h.started()
+	if len(jobs) != 1 {
+		t.Fatalf("jobs %+v", jobs)
+	}
+	// b.wav is merged while the run is in progress; it is not local yet.
+	h.e.mu.Lock()
+	merged := h.state("t")
+	merged.Files = []string{"a.wav", "b.wav"}
+	h.e.requestResyncLocked(&merged)
+	if err := h.st.UpdateOfflineItem(merged); err != nil {
+		t.Fatal(err)
+	}
+	h.e.mu.Unlock()
+	jobs[0].complete(sv.StatusOK, "")
+	h.waitIdle()
+	if got := h.state("t"); !slices.Equal(got.Files, []string{"a.wav", "b.wav"}) || !got.NeedsResync {
+		t.Fatalf("merged entry pruned: %+v", got)
 	}
 }
 
