@@ -140,6 +140,9 @@ var templates = map[string]string{
 	"offline.removedKept":          `Offline Item "{name}" removed; local copy kept`,
 	"offline.deletionsConfirmed":   `Deletions in "{name}" confirmed`,
 	"offline.deletionsRestored":    `Deleted files of "{name}" will be restored`,
+	"offline.renamed":              `Applied {count} rename(s) in "{name}"`,
+	"offline.renameCollision":      "Cannot apply a rename: {path} already exists on the other side",
+	"offline.followed":             `Storage Location of "{name}" moved to {path}`,
 
 	"sync.done":       `Synced "{name}": {transferred} transferred, {deleted} deleted, {conflicts} conflicts`,
 	"sync.noChanges":  `Synced "{name}": no changes`,

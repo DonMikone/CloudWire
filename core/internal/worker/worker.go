@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,8 +17,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rclone/rclone/fs"
 	fslog "github.com/rclone/rclone/fs/log"
 
+	"github.com/DonMikone/CloudWire/core/internal/identity"
 	"github.com/DonMikone/CloudWire/core/internal/mounts"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
@@ -266,6 +269,23 @@ func runBisync(job sv.Job, cmds <-chan sv.Command, out *emitter) int {
 		return 1
 	}
 	applyBwLimit(job.BwLimit)
+	id := job.Identity
+	if id != nil {
+		next, ok := runRenames(id, cmds, out)
+		if !ok {
+			return 0
+		}
+		if len(next.Bisync) > 0 {
+			params = nil
+			if err := json.Unmarshal(next.Bisync, &params); err != nil {
+				out.emit(sv.Msg{Type: "result", Status: sv.StatusError, Error: "bad bisync params: " + err.Error()})
+				return 1
+			}
+		}
+		if next.Identity != nil {
+			id = next.Identity
+		}
+	}
 	params["_async"] = true
 	jobID, err := startAsync("sync/bisync", params)
 	if err != nil {
@@ -281,6 +301,12 @@ func runBisync(job sv.Job, cmds <-chan sv.Command, out *emitter) int {
 	switch {
 	case st.Success:
 		res.Status = sv.StatusOK
+		if id != nil {
+			workdir, _ := params["workdir"].(string)
+			if err := captureIdentity(id, workdir); err != nil {
+				fs.Infof(nil, "identity snapshot: %v", err)
+			}
+		}
 	case IsMassDelete(st.Error):
 		res.Status, res.Error = sv.StatusMassDelete, st.Error
 	default:
@@ -288,6 +314,98 @@ func runBisync(job sv.Job, cmds <-chan sv.Command, out *emitter) int {
 	}
 	out.emit(res)
 	return 0
+}
+
+// runRenames detects and applies the renames of an Offline Item before its
+// sync (package identity), reports them and waits for the engine's
+// "continue", which may carry params changed by the renames. false means the
+// job ended with its result already emitted.
+func runRenames(id *sv.IdentityJob, cmds <-chan sv.Command, out *emitter) (sv.Command, bool) {
+	ctx, cancel := context.WithCancel(jobContext())
+	defer cancel()
+	stop := make(chan struct{})
+	type found struct {
+		renames   []sv.Rename
+		collision string
+		err       error
+	}
+	done := make(chan found, 1)
+	go func() {
+		cloud, err := identity.NewCloud(ctx, id)
+		if err != nil {
+			done <- found{err: err}
+			return
+		}
+		ops, renames, collision, err := identity.Detect(ctx, id, cloud)
+		if err == nil && collision == "" {
+			// A started move always completes; stop only acts between moves.
+			err = identity.Apply(jobContext(), cloud, ops, stop)
+		}
+		done <- found{renames, collision, err}
+	}()
+	stopped := false
+	var f found
+	for waiting := true; waiting; {
+		select {
+		case c, ok := <-cmds:
+			if !ok {
+				cmds = nil
+				continue
+			}
+			switch c.Cmd {
+			case "stop":
+				if !stopped {
+					stopped = true
+					close(stop)
+					cancel()
+				}
+			case "bwlimit":
+				applyBwLimit(c.Rate)
+			case "stats":
+				out.emit(sv.Msg{Type: "stats"})
+			}
+		case f = <-done:
+			waiting = false
+		}
+	}
+	switch {
+	case stopped || errors.Is(f.err, identity.ErrStopped):
+		// Moves done so far are found again (as renames on both sides) next run.
+		out.emit(sv.Msg{Type: "result", Status: sv.StatusStopped})
+		return sv.Command{}, false
+	case f.err != nil:
+		out.emit(sv.Msg{Type: "result", Status: sv.StatusError, Error: f.err.Error()})
+		return sv.Command{}, false
+	case f.collision != "":
+		out.emit(sv.Msg{Type: "result", Status: sv.StatusCollision, Error: f.collision})
+		return sv.Command{}, false
+	}
+	out.emit(sv.Msg{Type: "renames", Renames: f.renames})
+	for c := range cmds {
+		switch c.Cmd {
+		case "continue":
+			return c, true
+		case "stop":
+			out.emit(sv.Msg{Type: "result", Status: sv.StatusStopped})
+			return sv.Command{}, false
+		case "bwlimit":
+			applyBwLimit(c.Rate)
+		case "stats":
+			out.emit(sv.Msg{Type: "stats"})
+		}
+	}
+	out.emit(sv.Msg{Type: "result", Status: sv.StatusStopped})
+	return sv.Command{}, false
+}
+
+// captureIdentity records the item's identities after a successful sync.
+func captureIdentity(id *sv.IdentityJob, workdir string) error {
+	ctx := jobContext()
+	cloud, err := identity.NewCloud(ctx, id)
+	if err != nil {
+		return err
+	}
+	return identity.Capture(ctx, id, cloud, workdir)
 }
 
 // IsMassDelete reports whether a bisync error is one of its safety aborts that

@@ -68,6 +68,9 @@ CREATE TABLE notifications(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT 
 	// can translate them; entries written before keep only their English message.
 	`ALTER TABLE activity ADD COLUMN code TEXT;
 ALTER TABLE activity ADD COLUMN params TEXT;`,
+	// Migration 5: the inode of an Offline Item's Storage Location, so a renamed or moved
+	// Storage Location can be found again.
+	`ALTER TABLE offline_items ADD COLUMN root_ino INTEGER;`,
 }
 
 // Open opens (and if needed creates and migrates) the database at path.

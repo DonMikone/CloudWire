@@ -1,28 +1,14 @@
 package offline
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
-	"github.com/DonMikone/CloudWire/core/internal/api"
+	"github.com/DonMikone/CloudWire/core/internal/selection"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
-
-func TestNormalizeSelection(t *testing.T) {
-	got, err := normalizeSelection([]string{"a/b/", "c", "/a", "c/"})
-	if err != nil || !slices.Equal(got, []string{"a", "c"}) {
-		t.Fatalf("got %q, %v", got, err)
-	}
-	for _, bad := range []string{"a//b", "..", "a/../b", "./a", "", "/"} {
-		var inv api.InvalidParams
-		if _, err := normalizeSelection([]string{"ok", bad}); !errors.As(err, &inv) {
-			t.Errorf("%q: want invalid params, got %v", bad, err)
-		}
-	}
-}
 
 func TestSelectionFromParams(t *testing.T) {
 	if got, err := selectionFromParams("folder", []string{"ignored"}); err != nil || !slices.Equal(got, []string{""}) {
@@ -36,7 +22,7 @@ func TestSelectionFromParams(t *testing.T) {
 	}
 }
 
-func TestApplyAndMergeSelection(t *testing.T) {
+func TestApplySelection(t *testing.T) {
 	var it store.OfflineItem
 	applySelection(&it, []string{""})
 	if it.Kind != "folder" || it.Files != nil || !slices.Equal(selectionOf(it), []string{""}) {
@@ -45,37 +31,6 @@ func TestApplyAndMergeSelection(t *testing.T) {
 	applySelection(&it, []string{"a/b"})
 	if it.Kind != "files" || !slices.Equal(selectionOf(it), []string{"a/b"}) {
 		t.Fatalf("files selection: %+v", it)
-	}
-	if got := mergeSelections([]string{"a/b", "c"}, []string{"a", "d/e"}); !slices.Equal(got, []string{"a", "c", "d/e"}) {
-		t.Fatalf("merge: %q", got)
-	}
-	if got := mergeSelections([]string{"a"}, []string{""}); !slices.Equal(got, []string{""}) {
-		t.Fatalf("merge with root: %q", got)
-	}
-}
-
-func TestRelevantAndCovers(t *testing.T) {
-	entries := []string{"Meine Daten/123/B", "Meine Daten/123/C"}
-	for rel, want := range map[string]bool{
-		"":                           true,
-		"Meine Daten":                true,
-		"Meine Daten/123":            true,
-		"Meine Daten/123/B":          true,
-		"Meine Daten/123/B/x.wav":    true,
-		"Meine Daten/123/A":          false,
-		"Meine Daten/123/readme.txt": false,
-		"Meine Daten/123/BB":         false,
-		"Meine":                      false,
-	} {
-		if got := relevant(entries, rel); got != want {
-			t.Errorf("relevant(%q) = %v, want %v", rel, got, want)
-		}
-	}
-	if covers(entries, "Meine Daten/123") || !covers([]string{""}, "x/y") {
-		t.Fatal("covers: ancestors are not covered, the root covers everything")
-	}
-	if got := uncovered([]string{"a", "b/c", "d"}, []string{"b", "d/e"}); !slices.Equal(got, []string{"a", "d"}) {
-		t.Fatalf("uncovered: %q", got)
 	}
 }
 
@@ -108,7 +63,7 @@ func TestDeselectedLocal(t *testing.T) {
 	writeFiles(t, dir, "M/123/B/x", "M/123/B/y", "M/123/C/c")
 	old := []string{"M/123/B", "M/123/C"}
 	next := []string{"M/123/B/y"}
-	got, err := deselectedLocal(dir, uncovered(old, next), next)
+	got, err := deselectedLocal(dir, selection.Uncovered(old, next), next)
 	want := []string{filepath.Join(dir, "M/123/B/x"), filepath.Join(dir, "M/123/C")}
 	if err != nil || !slices.Equal(got, want) {
 		t.Fatalf("got %q, %v; want %q", got, err, want)
@@ -161,24 +116,6 @@ func TestRemoveEmptyParents(t *testing.T) {
 	removeEmptyParents(dir, filepath.Join(inner, "snare.wav"), nil, []string{inner})
 	if _, err := os.Lstat(inner); err != nil {
 		t.Fatalf("nested Storage Location removed: %v", err)
-	}
-}
-
-func TestPartialFoldersAndFirstUnselected(t *testing.T) {
-	entries := []string{"M/123/B", "M/123/C", "top.txt"}
-	if got := partialFolders(entries); !slices.Equal(got, []string{"", "M", "M/123"}) {
-		t.Fatalf("partial folders %q", got)
-	}
-	for rel, want := range map[string]string{
-		"M/123/B/x.wav":  "",
-		"M/123":          "",
-		"M/123/New/a/b":  "M/123/New",
-		"M/readme.txt":   "M/readme.txt",
-		"Other/deep/one": "Other",
-	} {
-		if got := firstUnselected(entries, rel); got != want {
-			t.Errorf("firstUnselected(%q) = %q, want %q", rel, got, want)
-		}
 	}
 }
 

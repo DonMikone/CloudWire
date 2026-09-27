@@ -2,7 +2,10 @@ package offline
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,6 +17,7 @@ import (
 	"github.com/rclone/rclone/fs/config/obscure"
 
 	"github.com/DonMikone/CloudWire/core/internal/paths"
+	"github.com/DonMikone/CloudWire/core/internal/selection"
 	"github.com/DonMikone/CloudWire/core/internal/sharing/nextcloud"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
@@ -117,6 +121,9 @@ func (e *Engine) onLocalEvent(id string, w *watcher, ev fsevents.Event) {
 		return
 	}
 	if ev.Flags&(fsevents.MustScanSubDirs|fsevents.RootChanged) != 0 {
+		if ev.Flags&fsevents.RootChanged != 0 {
+			e.followRoot(id)
+		}
 		e.mu.Lock()
 		rt.due = minTime(rt.due, e.Now())
 		e.mu.Unlock()
@@ -130,12 +137,17 @@ func (e *Engine) onLocalEvent(id string, w *watcher, ev fsevents.Event) {
 	if p == w.root || !strings.HasPrefix(p, w.root+"/") {
 		return
 	}
-	e.localChange(id, strings.TrimPrefix(p, w.root+"/"), e.Now())
+	_, err := os.Lstat(p)
+	gone := ev.Flags&(fsevents.ItemRenamed|fsevents.ItemRemoved) != 0 && errors.Is(err, os.ErrNotExist)
+	e.localChange(id, strings.TrimPrefix(p, w.root+"/"), ev.Flags, gone, e.Now())
 }
 
 // localChange records a local modification of rel (relative to the Storage
 // Location) at now: it restarts the Quiet Period and marks the path pending.
-func (e *Engine) localChange(id, rel string, now time.Time) {
+// A synced path that was renamed or deleted (gone) skips the Quiet Period and
+// interrupts a run of the item (ADR 0011): the next run applies the rename
+// before bisync could take it for a deletion.
+func (e *Engine) localChange(id, rel string, flags fsevents.EventFlags, gone bool, now time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	rt := e.rt[id]
@@ -143,13 +155,24 @@ func (e *Engine) localChange(id, rel string, now time.Time) {
 		return
 	}
 	it, err := e.st.OfflineItem(id)
-	if err != nil || rel == "" || Excluded(rel, it.Excludes) {
+	if err != nil || rel == "" || selection.Excluded(rel, it.Excludes) {
 		return
 	}
 	if !Includes(it, rel) && !e.adoptableLocked(it, rel) {
 		return
 	}
-	if e.cur != nil && e.cur.q.itemID == id {
+	running := e.cur != nil && e.cur.q.itemID == id
+	if gone && e.vanishedLocked(rel, flags, running) {
+		if running {
+			e.interruptCurrentLocked()
+			return
+		}
+		rt.quietUntil = time.Time{}
+		rt.due = now
+		e.poke()
+		return
+	}
+	if running {
 		rt.duringRun[rel] = true
 		return
 	}
@@ -160,10 +183,24 @@ func (e *Engine) localChange(id, rel string, now time.Time) {
 	e.poke()
 }
 
+// vanishedLocked reports whether a gone path is the user's rename or deletion:
+// not a Conflict Copy bisync renamed, and not a file the running sync just
+// deleted itself (bisync logs its deletions before FSEvents reports them).
+// Folders removed outright are left to the next run.
+func (e *Engine) vanishedLocked(rel string, flags fsevents.EventFlags, running bool) bool {
+	if flags&fsevents.ItemRenamed != 0 {
+		return !strings.Contains(path.Base(rel), ConflictMarker(e.label()))
+	}
+	if flags&fsevents.ItemRemoved != 0 && flags&fsevents.ItemIsDir == 0 {
+		return !running || e.cur.files[rel] != "deleted"
+	}
+	return false
+}
+
 // adoptableLocked reports whether a local change outside a files item's
 // Selection creates something that joins it after the next run.
 func (e *Engine) adoptableLocked(it store.OfflineItem, rel string) bool {
-	top := firstUnselected(it.Files, rel)
+	top := selection.FirstUnselected(it.Files, rel)
 	if top == "" || neverAdopted(top, it.Excludes, ConflictMarker(e.label())) {
 		return false
 	}
@@ -191,7 +228,7 @@ func (e *Engine) startRemote(it store.OfflineItem) {
 		return
 	}
 	rw := &remoteWatch{kind: remoteGeneric}
-	if conn.Provider == "webdav" && (cfg["vendor"] == "nextcloud" || cfg["vendor"] == "owncloud") {
+	if conn.Provider == "webdav" && nextcloudVendor(cfg) {
 		base, root, err := nextcloud.DAVLocation(cfg["url"])
 		if err == nil {
 			pass, _ := obscure.Reveal(cfg["pass"])

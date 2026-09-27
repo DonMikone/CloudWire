@@ -7,21 +7,16 @@ import (
 	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
+	"github.com/DonMikone/CloudWire/core/internal/selection"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
-
-// remoteWithin reports whether remote path a equals b or lies below it.
-func remoteWithin(a, b string) bool {
-	a, b = strings.Trim(a, "/"), strings.Trim(b, "/")
-	return b == "" || a == b || strings.HasPrefix(a, b+"/")
-}
 
 // CoveredRemote returns the Connection-relative remote paths an item syncs.
 func CoveredRemote(it store.OfflineItem) []string {
 	sel := selectionOf(it)
 	out := make([]string, 0, len(sel))
 	for _, e := range sel {
-		out = append(out, joinRemote(it.RemotePath, e))
+		out = append(out, selection.Join(it.RemotePath, e))
 	}
 	return out
 }
@@ -35,23 +30,12 @@ func remoteOverlap(a, b store.OfflineItem) bool {
 	bs := CoveredRemote(b)
 	for _, x := range CoveredRemote(a) {
 		for _, y := range bs {
-			if remoteWithin(x, y) || remoteWithin(y, x) {
+			if selection.Within(x, y) || selection.Within(y, x) {
 				return true
 			}
 		}
 	}
 	return false
-}
-
-func joinRemote(dir, name string) string {
-	dir = strings.Trim(dir, "/")
-	if dir == "" {
-		return name
-	}
-	if name == "" {
-		return dir
-	}
-	return dir + "/" + name
 }
 
 // nestedAtCloudPath reports whether the Storage Location of one item lies in
@@ -67,7 +51,7 @@ func nestedAtCloudPath(a, b store.OfflineItem) bool {
 		outer, inner = b, a
 	}
 	root, innerRoot := strings.Trim(outer.RemotePath, "/"), strings.Trim(inner.RemotePath, "/")
-	if !remoteWithin(innerRoot, root) || innerRoot == root {
+	if !selection.Within(innerRoot, root) || innerRoot == root {
 		return false
 	}
 	rel := strings.TrimPrefix(strings.TrimPrefix(innerRoot, root), "/")

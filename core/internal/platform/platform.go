@@ -39,8 +39,10 @@ static int cwCPUTicks(unsigned long long *user, unsigned long long *sys, unsigne
 import "C"
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,6 +113,46 @@ func FreeBytes(path string) (uint64, error) {
 		return 0, err
 	}
 	return st.Bavail * uint64(st.Bsize), nil
+}
+
+// PathOfInode returns the current path of the file or folder with inode ino
+// on the volume of near (or of its nearest existing parent), through
+// /.vol/<dev>/<ino>. It finds a folder again after a rename or move.
+func PathOfInode(near string, ino uint64) (string, error) {
+	var st unix.Stat_t
+	for p := near; ; p = filepath.Dir(p) {
+		err := unix.Stat(p, &st)
+		if err == nil {
+			break
+		}
+		if p == "/" || p == "." {
+			return "", err
+		}
+	}
+	fd, err := unix.Open(fmt.Sprintf("/.vol/%d/%d", st.Dev, ino), unix.O_RDONLY, 0)
+	if err != nil {
+		return "", err
+	}
+	defer unix.Close(fd)
+	buf := make([]byte, unix.PathMax)
+	if _, _, errno := unix.Syscall(unix.SYS_FCNTL, uintptr(fd), unix.F_GETPATH, uintptr(unsafe.Pointer(&buf[0]))); errno != 0 {
+		return "", errno
+	}
+	if i := bytes.IndexByte(buf, 0); i >= 0 {
+		buf = buf[:i]
+	}
+	return string(buf), nil
+}
+
+// PersistentInodes reports whether path's volume keeps inode numbers across
+// renames and remounts (APFS, HFS+).
+func PersistentInodes(path string) bool {
+	var st unix.Statfs_t
+	if err := unix.Statfs(path, &st); err != nil {
+		return false
+	}
+	name := unix.ByteSliceToString(st.Fstypename[:])
+	return name == "apfs" || name == "hfs"
 }
 
 // MoveToTrash moves path into the user's Trash.

@@ -72,6 +72,7 @@ type fakeJob struct {
 	mu      sync.Mutex
 	out     sv.Msg
 	stopped bool
+	sent    []sv.Command
 }
 
 func (j *fakeJob) Done() <-chan struct{} { return j.done }
@@ -87,7 +88,12 @@ func (j *fakeJob) Stop(time.Duration) {
 	j.mu.Unlock()
 	j.finish()
 }
-func (j *fakeJob) Send(sv.Command) error { return nil }
+func (j *fakeJob) Send(c sv.Command) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.sent = append(j.sent, c)
+	return nil
+}
 func (j *fakeJob) finish() {
 	select {
 	case <-j.done:
@@ -195,10 +201,10 @@ func TestQuietPeriodRestartsOnEachChange(t *testing.T) {
 	h := newHarness(t)
 	h.addItem("a")
 	t0 := h.now
-	h.e.localChange("a", "Song.wav", t0)
+	h.e.localChange("a", "Song.wav", 0, false, t0)
 	h.step()
 	h.now = t0.Add(30 * time.Second)
-	h.e.localChange("a", "Song.wav", h.now)
+	h.e.localChange("a", "Song.wav", 0, false, h.now)
 	h.now = t0.Add(60 * time.Second)
 	h.step()
 	if n := len(h.started()); n != 0 {
@@ -216,7 +222,7 @@ func TestQuietPeriodRestartsOnEachChange(t *testing.T) {
 		t.Fatalf("expected one background bisync job for a at t0+90s, got %+v", jobs)
 	}
 	// Excluded names never trigger a sync.
-	h.e.localChange("a", ".DS_Store", h.now)
+	h.e.localChange("a", ".DS_Store", 0, false, h.now)
 	if h.e.rt["a"].pendingPaths[filepath.Join(h.dir, "store", "a", ".DS_Store")] {
 		t.Fatal("excluded change recorded")
 	}
@@ -493,7 +499,7 @@ func TestCreateRejectsLockedVault(t *testing.T) {
 func TestConflictStatusForPaths(t *testing.T) {
 	h := newHarness(t)
 	a := h.addItem("a")
-	h.e.localChange("a", "Sub/Changed.wav", h.now)
+	h.e.localChange("a", "Sub/Changed.wav", 0, false, h.now)
 	got, err := h.e.StatusForPaths([]string{
 		filepath.Join(a.StoragePath, "Bassline.Konflikt 2026-09-23 1405.wav"),
 		filepath.Join(a.StoragePath, "Sub/Changed.wav"),
@@ -627,9 +633,9 @@ func TestLocalAdditionsJoinTheSelection(t *testing.T) {
 	writeFiles(t, inner.StoragePath, "song.wav")
 
 	// The watcher starts a run for a new child of a partial folder only.
-	h.e.localChange("t", "T/New/n", h.now)
-	h.e.localChange("t", "T/~$Doc.docx", h.now)
-	h.e.localChange("t", "in/song.wav", h.now)
+	h.e.localChange("t", "T/New/n", 0, false, h.now)
+	h.e.localChange("t", "T/~$Doc.docx", 0, false, h.now)
+	h.e.localChange("t", "in/song.wav", 0, false, h.now)
 	pending := h.e.rt["t"].pendingPaths
 	if !pending[filepath.Join(it.StoragePath, "T/New/n")] || len(pending) != 1 {
 		t.Fatalf("pending %v", pending)
@@ -710,7 +716,7 @@ func TestStatusForNestedStorage(t *testing.T) {
 	if err := h.st.InsertOfflineItem(outer); err != nil {
 		t.Fatal(err)
 	}
-	h.e.localChange("in", "Song.wav", h.now)
+	h.e.localChange("in", "Song.wav", 0, false, h.now)
 	song, other, loose := filepath.Join(inner.StoragePath, "Song.wav"), filepath.Join(outer.StoragePath, "other/x.wav"),
 		filepath.Join(outer.StoragePath, "loose.txt")
 	got, err := h.e.StatusForPaths([]string{song, other, loose})

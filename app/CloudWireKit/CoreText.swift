@@ -380,6 +380,18 @@ public struct CoreText: Sendable, Hashable {
             guard let name = a["name"] else { return nil }
             return String(localized: "Deleted files of “\(name)” will be restored", bundle: a.bundle)
         },
+        "offline.renamed": { a in
+            guard let count = a.int("count"), let name = a["name"] else { return nil }
+            return String(localized: "Applied \(count) renames in “\(name)”", bundle: a.bundle)
+        },
+        "offline.renameCollision": { a in
+            guard let path = a["path"] else { return nil }
+            return String(localized: "Cannot apply a rename: \(path) already exists on the other side", bundle: a.bundle)
+        },
+        "offline.followed": { a in
+            guard let name = a["name"], let path = a["path"] else { return nil }
+            return String(localized: "Storage Location of “\(name)” moved to \(path)", bundle: a.bundle)
+        },
         "sync.done": { a in
             guard let name = a["name"], let transferred = a.int("transferred"), let deleted = a.int("deleted"),
                 let conflicts = a.int("conflicts")

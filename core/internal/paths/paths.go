@@ -114,6 +114,12 @@ func (p Paths) FiltersFile(itemID string) string {
 	return filepath.Join(p.FiltersDir, itemID+".txt")
 }
 
+// IdentityFile holds the identity snapshot of an Offline Item's synced paths
+// (package identity), inside its bisync working directory.
+func (p Paths) IdentityFile(itemID string) string {
+	return filepath.Join(p.BisyncWorkdir(itemID), "identity.json")
+}
+
 // KeychainService returns the Keychain service prefix.
 func KeychainService() string {
 	if s := os.Getenv(EnvKeychainService); s != "" {

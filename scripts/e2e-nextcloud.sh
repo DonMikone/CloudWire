@@ -206,11 +206,32 @@ mkdir -p "$TP/New" && echo n > "$TP/New/n.txt" && echo m > "$TP/New/m.txt"
 adopted() { exists_remote Tree/123/New/n.txt && [ "$(tree_files)" = '["Tree/123/B","Tree/123/New"]' ]; }
 wait_for 90 "local folder in a partial folder adopted and uploaded" adopted
 wait_for 60 "resync after adopting" resynced
-# A local rename of a checked folder is a rename in the cloud; the old entry leaves the Selection.
+# A local rename of a checked folder is one server-side move in the cloud (same file id); the
+# Selection follows without a resync and nothing is transferred.
+fileid() {
+  dav -X PROPFIND -H 'Depth: 0' --data '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><oc:fileid/></d:prop></d:propfind>' \
+    "$(dav_url "$1")" | sed -n 's:.*<oc:fileid>\([0-9]*\)</oc:fileid>.*:\1:p'
+}
+FID_B="$(fileid Tree/123/B)"
+[ -n "$FID_B" ] || fail "no file id for Tree/123/B"
 mv "$TP/B" "$TP/B2"
 renamed() { exists_remote Tree/123/B2/b.txt && ! exists_remote Tree/123/B/b.txt && [ "$(tree_files)" = '["Tree/123/B2","Tree/123/New"]' ]; }
 wait_for 90 "renamed checked folder" renamed
-wait_for 60 "resync after the rename" resynced
+[ "$(fileid Tree/123/B2)" = "$FID_B" ] && ok "renamed in the cloud by a server-side move" || fail "folder copied instead of moved"
+wait_for 60 "synced after the rename" resynced
+rpc offline.runs "{\"itemId\":\"$TID\",\"limit\":1}" | jq -e '.[0].status == "ok" and .[0].transferred == 0 and .[0].deleted == 0' >/dev/null \
+  && ok "the rename transferred and deleted nothing" || fail "rename run: $(rpc offline.runs "{\"itemId\":\"$TID\",\"limit\":1}")"
+# A rename in the cloud renames the local folder.
+dav -X MOVE -H "Destination: $(dav_url Tree/123/B3)" "$(dav_url Tree/123/B2)"
+cloud_renamed() { [ -f "$TP/B3/b.txt" ] && [ ! -e "$TP/B2" ] && [ "$(tree_files)" = '["Tree/123/B3","Tree/123/New"]' ]; }
+wait_for 120 "cloud rename applied locally" cloud_renamed
+wait_for 60 "synced after the cloud rename" resynced
+# Renaming a partially selected folder moves the whole cloud folder, cloud-only content included.
+mv "$TROOT/Tree/123" "$TROOT/Tree/124"
+TP="$TROOT/Tree/124"
+partial_renamed() { exists_remote Tree/124/A/a.txt && ! exists_remote Tree/123 && [ "$(tree_files)" = '["Tree/124/B3","Tree/124/New"]' ]; }
+wait_for 90 "partially selected folder renamed with its cloud-only content" partial_renamed
+wait_for 60 "synced after the folder rename" resynced
 [ ! -e "$TP/A" ] && [ ! -e "$TP/readme.txt" ] && [ ! -e "$TP/C" ] && ok "cloud-only parts of partial folders stay in the cloud" || fail "cloud-only parts downloaded"
 
 log "Shares"

@@ -69,9 +69,10 @@ func TestMountFolderMigrationKeepsOldDefaultForExistingMounts(t *testing.T) {
 	if err := s.InsertMount(Mount{ID: "m", ConnectionID: "a", MountPoint: "/x", VolumeName: "x", MountType: "nfsmount", CacheMaxGB: 1}); err != nil {
 		t.Fatal(err)
 	}
-	// Pretend the database predates migration 3 (and so migration 4).
+	// Pretend the database predates migration 3 (and so the later ones).
 	if _, err := s.DB().Exec(`UPDATE schema_version SET version = 2;
-ALTER TABLE activity DROP COLUMN code; ALTER TABLE activity DROP COLUMN params`); err != nil {
+ALTER TABLE activity DROP COLUMN code; ALTER TABLE activity DROP COLUMN params;
+ALTER TABLE offline_items DROP COLUMN root_ino`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
@@ -93,7 +94,7 @@ func TestActivityCodesMigrationKeepsOldEntries(t *testing.T) {
 	}
 	// Pretend the database predates migration 4 and holds an entry of that time.
 	if _, err := s.DB().Exec(`ALTER TABLE activity DROP COLUMN code; ALTER TABLE activity DROP COLUMN params;
-UPDATE schema_version SET version = 3;
+ALTER TABLE offline_items DROP COLUMN root_ino; UPDATE schema_version SET version = 3;
 INSERT INTO activity(ts,level,category,message) VALUES (1,'info','mount','Mount "NC" removed')`); err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +117,42 @@ INSERT INTO activity(ts,level,category,message) VALUES (1,'info','mount','Mount 
 	}
 	if old := got[1].Text; !reflect.DeepEqual(old, msg.Text{Message: `Mount "NC" removed`}) {
 		t.Fatalf("old entry must keep its message without a code: %+v", old)
+	}
+}
+
+func TestOfflineItemUpgradeAndUpdate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cloudwire.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertConnection(Connection{ID: "a", Name: "Cloud", Kind: "remote", RcloneRemote: "cw-a", Provider: "webdav", CreatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// An item stored before migration 5 has no Storage Location inode yet.
+	if _, err := s.DB().Exec(`ALTER TABLE offline_items DROP COLUMN root_ino; UPDATE schema_version SET version = 4;
+INSERT INTO offline_items(id,connection_id,kind,remote_path,storage_path,excludes,created_at)
+VALUES ('of1','a','folder','Musik','/Users/mike/CloudWire/Musik','[]',1)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer s.Close()
+	it, err := s.OfflineItem("of1")
+	if err != nil || it.RootIno != 0 {
+		t.Fatalf("upgraded item %+v %v", it, err)
+	}
+	// A renamed cloud root and Storage Location are both stored.
+	it.RemotePath, it.StoragePath, it.RootIno = "000 - Musik", "/Users/mike/CloudWire/000 - Musik", 1<<40+7
+	if err := s.UpdateOfflineItem(it); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.OfflineItem("of1")
+	if err != nil || got.RemotePath != it.RemotePath || got.StoragePath != it.StoragePath || got.RootIno != it.RootIno {
+		t.Fatalf("updated item %+v %v", got, err)
 	}
 }
 

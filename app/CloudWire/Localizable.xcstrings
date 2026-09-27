@@ -973,6 +973,47 @@
         }
       }
     },
+    "Applied %lld renames in “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Umbenennung in „%2$@“ übernommen"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Umbenennungen in „%2$@“ übernommen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Applied %lld rename in “%@”"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Applied %lld renames in “%@”"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Apply" : {
       "localizations" : {
         "de" : {
@@ -1191,6 +1232,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anmeldung abbrechen"
+          }
+        }
+      }
+    },
+    "Cannot apply a rename: %@ already exists on the other side" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Umbenennung nicht möglich: %@ existiert auf der anderen Seite bereits"
           }
         }
       }
@@ -6433,6 +6485,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Speicherort fehlt"
+          }
+        }
+      }
+    },
+    "Storage Location of “%@” moved to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speicherort von „%1$@“ nach %2$@ verschoben"
           }
         }
       }

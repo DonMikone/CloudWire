@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -53,32 +54,44 @@ func DAVLocation(davURL string) (base, rootPath string, err error) {
 		return "", "", err
 	}
 	p := u.EscapedPath()
-	i := strings.Index(p, "/remote.php/")
+	i, rest, ok := splitDAVPath(p)
 	if i < 0 {
 		return "", "", fmt.Errorf("not a Nextcloud WebDAV URL: %s", davURL)
+	}
+	if !ok {
+		return "", "", fmt.Errorf("unsupported Nextcloud WebDAV path: %s", u.Path)
 	}
 	baseURL := *u
 	baseURL.Path, baseURL.RawPath, baseURL.RawQuery, baseURL.Fragment = "", "", "", ""
 	base = strings.TrimRight(baseURL.String(), "/") + p[:i]
-	rest := p[i+len("/remote.php"):]
-	switch {
-	case strings.HasPrefix(rest, "/dav/files/"):
-		rest = rest[len("/dav/files/"):]
-		if j := strings.IndexByte(rest, '/'); j >= 0 {
-			rest = rest[j:]
-		} else {
-			rest = ""
-		}
-	case rest == "/webdav" || strings.HasPrefix(rest, "/webdav/"):
-		rest = rest[len("/webdav"):]
-	default:
-		return "", "", fmt.Errorf("unsupported Nextcloud WebDAV path: %s", u.Path)
-	}
 	rest, err = url.PathUnescape(strings.TrimRight(rest, "/"))
 	if err != nil {
 		return "", "", err
 	}
 	return base, rest, nil
+}
+
+// splitDAVPath splits an escaped URL path at "/remote.php/": i is its index
+// (-1 if missing) and rest the still escaped path below the user's files root
+// (…/remote.php/dav/files/<user> or …/remote.php/webdav). ok is false for
+// other endpoints.
+func splitDAVPath(p string) (i int, rest string, ok bool) {
+	i = strings.Index(p, "/remote.php/")
+	if i < 0 {
+		return -1, "", false
+	}
+	rest = p[i+len("/remote.php"):]
+	switch {
+	case strings.HasPrefix(rest, "/dav/files/"):
+		rest = rest[len("/dav/files/"):]
+		if j := strings.IndexByte(rest, '/'); j >= 0 {
+			return i, rest[j:], true
+		}
+		return i, "", true
+	case rest == "/webdav" || strings.HasPrefix(rest, "/webdav/"):
+		return i, rest[len("/webdav"):], true
+	}
+	return i, "", false
 }
 
 // JoinPath joins the WebDAV root path and a remote path into an OCS path.
@@ -228,13 +241,21 @@ func (c *Client) DeleteAppPassword(ctx context.Context) error {
 
 // ---- WebDAV properties ----
 
+// ErrNotFound is returned for a path that does not exist on the server.
+var ErrNotFound = errors.New("not found")
+
 type multistatus struct {
 	Responses []struct {
 		Href     string `xml:"href"`
 		Propstat []struct {
 			Prop struct {
-				ETag   string `xml:"getetag"`
-				FileID string `xml:"fileid"`
+				ETag          string `xml:"getetag"`
+				FileID        string `xml:"fileid"`
+				ContentLength string `xml:"getcontentlength"`
+				LastModified  string `xml:"getlastmodified"`
+				ResourceType  struct {
+					Collection *struct{} `xml:"collection"`
+				} `xml:"resourcetype"`
 			} `xml:"prop"`
 			Status string `xml:"status"`
 		} `xml:"propstat"`
@@ -266,32 +287,119 @@ func (c *Client) davURL(ocsPath string) string {
 	return root + "/" + strings.Join(parts, "/")
 }
 
-func (c *Client) propfind(ctx context.Context, ocsPath, props string) (multistatus, error) {
+// propfind requests props of an OCS path; depth is "0" (the path only) or
+// "1" (with its children, the answer size then grows with the folder).
+func (c *Client) propfind(ctx context.Context, ocsPath, props, depth string) (multistatus, error) {
 	body := `<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop>` + props + `</d:prop></d:propfind>`
 	req, err := c.newRequest(ctx, "PROPFIND", c.davURL(ocsPath), strings.NewReader(body))
 	if err != nil {
 		return multistatus{}, err
 	}
-	req.Header.Set("Depth", "0")
+	req.Header.Set("Depth", depth)
 	req.Header.Set("Content-Type", "application/xml")
 	resp, err := c.http().Do(req)
 	if err != nil {
 		return multistatus{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return multistatus{}, fmt.Errorf("PROPFIND %s: %w", ocsPath, ErrNotFound)
+	}
 	if resp.StatusCode != http.StatusMultiStatus {
 		return multistatus{}, fmt.Errorf("PROPFIND %s: HTTP %d", ocsPath, resp.StatusCode)
 	}
+	var r io.Reader = resp.Body
+	if depth == "0" {
+		r = io.LimitReader(resp.Body, 1<<20)
+	}
 	var ms multistatus
-	if err := xml.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&ms); err != nil {
+	if err := xml.NewDecoder(r).Decode(&ms); err != nil {
 		return ms, err
 	}
 	return ms, nil
 }
 
+// DAVEntry is a folder or file of a WebDAV listing.
+type DAVEntry struct {
+	Path     string // OCS path, URL-decoded, without trailing "/"
+	Dir      bool
+	FileID   string
+	ETag     string
+	Size     int64
+	Modified time.Time
+}
+
+// ListDir lists a folder and its direct children (PROPFIND Depth 1). The
+// folder itself comes first, with Path == ocsPath. ErrNotFound if it is gone.
+func (c *Client) ListDir(ctx context.Context, ocsPath string) ([]DAVEntry, error) {
+	ms, err := c.propfind(ctx, ocsPath,
+		`<d:getetag/><oc:fileid/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/>`, "1")
+	if err != nil {
+		return nil, err
+	}
+	self := strings.Trim(ocsPath, "/")
+	var out []DAVEntry
+	for _, r := range ms.Responses {
+		p, err := hrefPath(r.Href)
+		if err != nil {
+			return nil, err
+		}
+		e := DAVEntry{Path: p}
+		for _, ps := range r.Propstat {
+			if ps.Status != "" && !strings.Contains(ps.Status, " 200 ") {
+				continue
+			}
+			pr := ps.Prop
+			e.Dir = e.Dir || pr.ResourceType.Collection != nil
+			if pr.FileID != "" {
+				e.FileID = pr.FileID
+			}
+			if pr.ETag != "" {
+				e.ETag = strings.Trim(pr.ETag, `"`)
+			}
+			if n, err := strconv.ParseInt(pr.ContentLength, 10, 64); err == nil {
+				e.Size = n
+			}
+			if t, err := http.ParseTime(pr.LastModified); err == nil {
+				e.Modified = t
+			}
+		}
+		if strings.Trim(p, "/") == self {
+			e.Path = ocsPath
+			out = append([]DAVEntry{e}, out...)
+			continue
+		}
+		out = append(out, e)
+	}
+	if len(out) == 0 || out[0].Path != ocsPath {
+		return nil, fmt.Errorf("PROPFIND %s: folder missing in response", ocsPath)
+	}
+	return out, nil
+}
+
+// hrefPath maps a WebDAV href (…/remote.php/dav/files/<user>/a/b or
+// …/remote.php/webdav/a/b) to its URL-decoded OCS path ("/a/b").
+func hrefPath(href string) (string, error) {
+	if u, err := url.Parse(href); err == nil && u.Scheme != "" {
+		href = u.EscapedPath()
+	}
+	_, rest, ok := splitDAVPath(href)
+	if !ok {
+		return "", fmt.Errorf("unexpected WebDAV href %q", href)
+	}
+	p, err := url.PathUnescape(strings.TrimRight(rest, "/"))
+	if err != nil {
+		return "", err
+	}
+	if p == "" {
+		p = "/"
+	}
+	return p, nil
+}
+
 // ETag returns the WebDAV ETag of an OCS path (PROPFIND Depth 0).
 func (c *Client) ETag(ctx context.Context, ocsPath string) (string, error) {
-	ms, err := c.propfind(ctx, ocsPath, `<d:getetag/>`)
+	ms, err := c.propfind(ctx, ocsPath, `<d:getetag/>`, "0")
 	if err != nil {
 		return "", err
 	}
@@ -307,7 +415,7 @@ func (c *Client) ETag(ctx context.Context, ocsPath string) (string, error) {
 
 // FileID returns the Nextcloud file id of an OCS path.
 func (c *Client) FileID(ctx context.Context, ocsPath string) (string, error) {
-	ms, err := c.propfind(ctx, ocsPath, `<oc:fileid/>`)
+	ms, err := c.propfind(ctx, ocsPath, `<oc:fileid/>`, "0")
 	if err != nil {
 		return "", err
 	}

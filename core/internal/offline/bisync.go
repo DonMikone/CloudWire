@@ -147,47 +147,6 @@ func WriteFilters(p paths.Paths, it store.OfflineItem) error {
 	return os.WriteFile(f, []byte(content), 0o600)
 }
 
-// Excluded reports whether a path relative to the storage root matches one
-// of the exclude patterns (used to ignore FSEvents).
-func Excluded(rel string, excludes []string) bool {
-	rel = strings.Trim(filepath.ToSlash(rel), "/")
-	if rel == "" {
-		return false
-	}
-	parts := strings.Split(rel, "/")
-	base := parts[len(parts)-1]
-	if strings.HasSuffix(base, ".partial") {
-		return true // rclone's in-progress downloads
-	}
-	for _, ex := range excludes {
-		ex = strings.TrimPrefix(strings.TrimSpace(ex), "/")
-		if strings.HasSuffix(ex, "/**") {
-			dir := strings.TrimSuffix(ex, "/**")
-			for _, p := range parts[:len(parts)-1] {
-				if ok, _ := path.Match(dir, p); ok {
-					return true
-				}
-			}
-			if ok, _ := path.Match(dir, base); ok {
-				return true
-			}
-			continue
-		}
-		if strings.Contains(ex, "/") {
-			if ok, _ := path.Match(ex, rel); ok {
-				return true
-			}
-			continue
-		}
-		for _, p := range parts {
-			if ok, _ := path.Match(ex, p); ok {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // ItemName is the short display name of an Offline Item, as shown in the app.
 func ItemName(it store.OfflineItem) string {
 	if it.Kind == "files" && len(it.Files) == 1 {

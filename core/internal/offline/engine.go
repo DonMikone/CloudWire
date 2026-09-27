@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,9 @@ type itemRT struct {
 	watch          *watcher
 	remote         *remoteWatch
 	lastNotifiedEr bool
+	// rootRename is a cloud root rename the next run applies first: the
+	// Storage Location of an item created before 0.3.0 was renamed.
+	rootRename *sv.RootRename
 }
 
 // Progress is the offline.progress event payload.
@@ -393,6 +397,7 @@ func (e *Engine) step(now time.Time) time.Time {
 				e.queue = e.queue[1:]
 				continue
 			}
+			e.followRootLocked(&it)
 			if reason := e.blockedReason(it); reason != "" {
 				e.queue = e.queue[1:]
 				e.setStateLocked(it, StatePaused, reason)
@@ -444,6 +449,9 @@ func (e *Engine) isQueuedOrRunning(key string) bool {
 func (e *Engine) blockedReason(it store.OfflineItem) string {
 	if e.Vaults != nil && e.Vaults.IsLocked(it.ConnectionID) {
 		return ReasonVaultLocked
+	}
+	if rt := e.rt[it.ID]; rt != nil && rt.rootRename != nil {
+		return "" // the Storage Location moved; the run renames the cloud root first
 	}
 	if fi, err := os.Stat(it.StoragePath); err != nil || !fi.IsDir() {
 		// The Storage Location of a new item is created at its first sync. An
@@ -580,6 +588,9 @@ func errorReason(it store.OfflineItem) msg.Text {
 	if it.State != StateError || it.LastError == "" {
 		return msg.Text{}
 	}
+	if path, ok := strings.CutPrefix(it.LastError, renameCollisionPrefix); ok {
+		return msg.New("offline.renameCollision", "path", path)
+	}
 	if strings.Contains(strings.ToLower(it.LastError), "directory not found") {
 		return msg.New("offline.cloudFolderMissing", "detail", it.LastError)
 	}
@@ -648,6 +659,14 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 		if err := WriteFilters(e.paths, it); err != nil {
 			return err
 		}
+		// The Storage Location's inode finds it again after a rename or move.
+		var st unix.Stat_t
+		if unix.Stat(it.StoragePath, &st) == nil && st.Ino != it.RootIno {
+			it.RootIno = st.Ino
+			if err := e.st.UpdateOfflineItem(it); err != nil {
+				return err
+			}
+		}
 		if err := os.MkdirAll(e.paths.BisyncWorkdir(it.ID), 0o700); err != nil {
 			return err
 		}
@@ -655,10 +674,16 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 		if err != nil {
 			return err
 		}
+		items, err := e.st.OfflineItems()
+		if err != nil {
+			return err
+		}
+		others := slices.DeleteFunc(items, func(x store.OfflineItem) bool { return x.ID == it.ID })
+		rt := e.itemRT(it.ID)
 		job.Type, job.ID, job.Bisync = sv.JobBisync, it.ID, b
+		job.Identity = e.identityJob(it, conn, others, rt.rootRename)
 		runID, _ := e.st.StartRun(it.ID, "bisync")
 		r.runID = runID
-		rt := e.itemRT(it.ID)
 		r.resyncGen = rt.resyncGen
 		rt.progress = &Progress{ID: it.ID}
 		rt.duringRun = map[string]bool{}
@@ -696,6 +721,10 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 }
 
 func (e *Engine) onMsg(r *running, m sv.Msg) {
+	if m.Type == "renames" && r.q.migration == nil {
+		e.onRenames(r, m.Renames)
+		return
+	}
 	if m.Type != "progress" {
 		return
 	}
@@ -776,6 +805,16 @@ func safetyAbort(l sv.LogLine) string {
 // stopCurrentLocked stops the running job gracefully (30 s, then SIGKILL)
 // and puts it back at the head of the queue.
 func (e *Engine) stopCurrentLocked(reason string) {
+	e.requeueCurrentLocked(StatePaused, reason)
+}
+
+// interruptCurrentLocked stops the running job gracefully so it runs again
+// at once: a synced path was renamed or deleted during the run (ADR 0011).
+func (e *Engine) interruptCurrentLocked() {
+	e.requeueCurrentLocked(StatePending, "")
+}
+
+func (e *Engine) requeueCurrentLocked(state, reason string) {
 	r := e.cur
 	if r == nil || r.stopping {
 		return
@@ -784,7 +823,7 @@ func (e *Engine) stopCurrentLocked(reason string) {
 	e.queue = append([]queued{r.q}, e.queue...)
 	if r.q.migration == nil {
 		if it, err := e.st.OfflineItem(r.q.itemID); err == nil {
-			e.setStateLocked(it, StatePaused, reason)
+			e.setStateLocked(it, state, reason)
 		}
 	}
 	go r.job.Stop(30 * time.Second)
@@ -909,6 +948,17 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 			params["reason"], params["side"], params["deletes"], params["total"] = md.Reason, md.Side, md.Deletes, md.Total
 		}
 		e.notify.Notify(notify.KindMassDelete, params)
+		e.publishItemLocked(it)
+	case sv.StatusCollision:
+		it.State, it.LastError = StateError, renameCollisionPrefix+out.Error
+		_ = e.st.UpdateOfflineItem(it)
+		rt.retryAt = now.Add(5 * time.Minute)
+		t := msg.New("offline.renameCollision", "path", out.Error)
+		e.log.Error("sync", it.ID, t, map[string]any{"runId": r.runID})
+		if !rt.lastNotifiedEr {
+			rt.lastNotifiedEr = true
+			e.notify.Notify(notify.KindError, notify.ErrorParams(name, it.ID, t))
+		}
 		e.publishItemLocked(it)
 	case sv.StatusStopped:
 		if !r.stopping {

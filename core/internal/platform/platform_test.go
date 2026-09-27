@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -95,5 +96,39 @@ func TestRunDisclaimed(t *testing.T) {
 	}
 	if time.Since(start) > 3*time.Second {
 		t.Fatal("timeout took too long")
+	}
+}
+
+func TestPathOfInodeFollowsRename(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !PersistentInodes(base) {
+		t.Skip("temp dir is not on APFS/HFS+")
+	}
+	old := filepath.Join(base, "Musik", "TAKEOFFANDFLY")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ino := fi.Sys().(*syscall.Stat_t).Ino
+	moved := filepath.Join(base, "Archiv", "000 - TAKEOFFANDFLY")
+	if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(old, moved); err != nil {
+		t.Fatal(err)
+	}
+	// The old path and its parent's name no longer tell where it went.
+	got, err := PathOfInode(old, ino)
+	if err != nil || got != moved {
+		t.Fatalf("PathOfInode = %q, %v; want %q", got, err, moved)
+	}
+	if _, err := PathOfInode(old, ino+1<<40); err == nil {
+		t.Fatal("unknown inode: want error")
 	}
 }

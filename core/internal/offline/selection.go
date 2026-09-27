@@ -10,45 +10,11 @@ import (
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
+	"github.com/DonMikone/CloudWire/core/internal/selection"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
 
-// A Selection is a sorted list of paths relative to an item's root (with
-// "/" separators), none of which lies below another. [""] is the whole root.
-
-// normalizeSelection validates, dedupes and sorts selected paths and drops
-// every entry that lies below another one.
-func normalizeSelection(entries []string) ([]string, error) {
-	trimmed := make([]string, 0, len(entries))
-	for _, e := range entries {
-		t := strings.Trim(e, "/")
-		if t == "" {
-			return nil, api.Invalid("invalid path %q", e)
-		}
-		for _, seg := range strings.Split(t, "/") {
-			if seg == "" || seg == "." || seg == ".." {
-				return nil, api.Invalid("invalid path %q", e)
-			}
-		}
-		trimmed = append(trimmed, t)
-	}
-	slices.Sort(trimmed)
-	trimmed = slices.Compact(trimmed)
-	out := make([]string, 0, len(trimmed))
-	for _, t := range trimmed {
-		below := false
-		for _, o := range trimmed {
-			if o != t && remoteWithin(t, o) {
-				below = true
-				break
-			}
-		}
-		if !below {
-			out = append(out, t)
-		}
-	}
-	return out, nil
-}
+// Selections of Offline Items (package selection has the vocabulary).
 
 // selectionFromParams builds the Selection of kind/files request params.
 func selectionFromParams(kind string, files []string) ([]string, error) {
@@ -59,7 +25,7 @@ func selectionFromParams(kind string, files []string) ([]string, error) {
 		if len(files) == 0 {
 			return nil, api.Invalid("files must not be empty")
 		}
-		return normalizeSelection(files)
+		return selection.Normalize(files)
 	default:
 		return nil, api.Invalid("kind must be folder or files")
 	}
@@ -82,45 +48,10 @@ func applySelection(it *store.OfflineItem, entries []string) {
 	it.Kind, it.Files = "files", entries
 }
 
-// mergeSelections returns the union of two Selections.
-func mergeSelections(a, b []string) []string {
-	if slices.Contains(a, "") || slices.Contains(b, "") {
-		return []string{""}
-	}
-	merged, _ := normalizeSelection(append(slices.Clone(a), b...)) // inputs are valid
-	return merged
-}
-
-// covers reports whether rel is an entry or lies below one.
-func covers(entries []string, rel string) bool {
-	for _, e := range entries {
-		if remoteWithin(rel, e) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasBelow reports whether some entry lies strictly below rel.
-func hasBelow(entries []string, rel string) bool {
-	for _, e := range entries {
-		if (rel == "" && e != "") || strings.HasPrefix(e, rel+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-// relevant reports whether rel is synced: the root, a covered path, or a
-// parent folder of an entry (partially selected).
-func relevant(entries []string, rel string) bool {
-	return rel == "" || covers(entries, rel) || hasBelow(entries, rel)
-}
-
 // Includes reports whether rel, relative to an item's Storage Location, is
 // synced by the item or is a parent folder of a selected path.
 func Includes(it store.OfflineItem, rel string) bool {
-	return it.Kind != "files" || relevant(it.Files, rel)
+	return it.Kind != "files" || selection.Relevant(it.Files, rel)
 }
 
 // changedDirs lists the cloud folders whose Mount listings a sync of it may
@@ -142,17 +73,6 @@ func changedDirs(it store.OfflineItem) []string {
 	return slices.Compact(out)
 }
 
-// uncovered returns the entries of a that b does not cover.
-func uncovered(a, b []string) []string {
-	var out []string
-	for _, x := range a {
-		if !covers(b, x) {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
 // deselectedLocal returns the existing local paths below storage that the
 // deselected entries gone leave outside the new Selection next.
 func deselectedLocal(storage string, gone, next []string) ([]string, error) {
@@ -167,10 +87,10 @@ func deselectedLocal(storage string, gone, next []string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if covers(next, g) {
+		if selection.Covers(next, g) {
 			return nil
 		}
-		if (g != "" && !hasBelow(next, g)) || !fi.IsDir() {
+		if (g != "" && !selection.HasBelow(next, g)) || !fi.IsDir() {
 			out = append(out, abs)
 			return nil
 		}
@@ -179,7 +99,7 @@ func deselectedLocal(storage string, gone, next []string) ([]string, error) {
 			return err
 		}
 		for _, c := range children {
-			if err := walk(joinRemote(g, c.Name())); err != nil {
+			if err := walk(selection.Join(g, c.Name())); err != nil {
 				return err
 			}
 		}
@@ -199,7 +119,7 @@ func deselectedLocal(storage string, gone, next []string) ([]string, error) {
 func removeEmptyParents(storage, p string, next, roots []string) {
 	for d := filepath.Dir(p); d != storage && paths.IsWithin(d, storage); d = filepath.Dir(d) {
 		rel, err := filepath.Rel(storage, d)
-		if err != nil || relevant(next, filepath.ToSlash(rel)) || slices.Contains(roots, d) {
+		if err != nil || selection.Relevant(next, filepath.ToSlash(rel)) || slices.Contains(roots, d) {
 			return
 		}
 		entries, err := os.ReadDir(d)
@@ -220,37 +140,11 @@ func removeEmptyParents(storage, p string, next, roots []string) {
 	}
 }
 
-// partialFolders returns the partially selected folders of a Selection: the
-// root and every parent folder of an entry, sorted.
-func partialFolders(entries []string) []string {
-	out := []string{""}
-	for _, e := range entries {
-		for d := path.Dir(e); d != "." && d != "/" && d != ""; d = path.Dir(d) {
-			out = append(out, d)
-		}
-	}
-	slices.Sort(out)
-	return slices.Compact(out)
-}
-
-// firstUnselected returns the outermost part of rel that the Selection does
-// not sync (a new child of a partially selected folder), or "" if rel is synced.
-func firstUnselected(entries []string, rel string) string {
-	for i := 0; i <= len(rel); i++ {
-		if i == len(rel) || rel[i] == '/' {
-			if p := rel[:i]; !relevant(entries, p) {
-				return p
-			}
-		}
-	}
-	return ""
-}
-
 // neverAdopted reports whether a local path never joins a Selection on its
 // own: excluded, system or temporary files, Conflict Copies and Vault folders.
 func neverAdopted(rel string, excludes []string, marker string) bool {
 	name := path.Base(rel)
-	return Excluded(rel, excludes) || name == ".localized" || name == "Icon\r" ||
+	return selection.Excluded(rel, excludes) || name == ".localized" || name == "Icon\r" ||
 		strings.HasPrefix(name, "~$") || strings.HasPrefix(name, ".~lock.") ||
 		strings.Contains(name, marker) || strings.HasSuffix(name, vaultFolderSuffix)
 }
@@ -263,7 +157,7 @@ func localAdditions(it store.OfflineItem, marker string, roots []string) ([]stri
 		return nil, nil
 	}
 	var out []string
-	for _, d := range partialFolders(it.Files) {
+	for _, d := range selection.PartialFolders(it.Files) {
 		names, err := os.ReadDir(filepath.Join(it.StoragePath, d))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -272,8 +166,8 @@ func localAdditions(it store.OfflineItem, marker string, roots []string) ([]stri
 			return nil, err
 		}
 		for _, n := range names {
-			rel := joinRemote(d, n.Name())
-			if relevant(it.Files, rel) || neverAdopted(rel, it.Excludes, marker) {
+			rel := selection.Join(d, n.Name())
+			if selection.Relevant(it.Files, rel) || neverAdopted(rel, it.Excludes, marker) {
 				continue
 			}
 			abs := filepath.Join(it.StoragePath, rel)

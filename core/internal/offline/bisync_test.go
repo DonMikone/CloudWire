@@ -80,24 +80,6 @@ func TestFilterLines(t *testing.T) {
 	}
 }
 
-func TestExcluded(t *testing.T) {
-	ex := store.DefaultSettings().DefaultExcludes
-	for rel, want := range map[string]bool{
-		".DS_Store":               true,
-		"Sub/.DS_Store":           true,
-		"._Bassline.wav":          true,
-		".Spotlight-V100/Store-2": true,
-		".Trashes":                true,
-		"Bassline.wav":            false,
-		"Sub/Trashes/x.wav":       false,
-		"Mix.wav.x1Y2.partial":    true,
-	} {
-		if got := Excluded(rel, ex); got != want {
-			t.Errorf("Excluded(%q) = %v, want %v", rel, got, want)
-		}
-	}
-}
-
 func TestParseMassDelete(t *testing.T) {
 	for _, tc := range []struct {
 		text string

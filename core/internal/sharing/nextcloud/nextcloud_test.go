@@ -264,3 +264,52 @@ func TestPollKeepsEnteredServerForForeignHost(t *testing.T) {
 		t.Fatalf("server %q %v; the app password must only go to the entered host", c.Server, err)
 	}
 }
+
+func TestListDir(t *testing.T) {
+	const listing = `<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+<d:response><d:href>/remote.php/dav/files/mike/Tree/123/</d:href><d:propstat><d:prop>
+ <d:getetag>"e-root"</d:getetag><oc:fileid>10</oc:fileid><d:resourcetype><d:collection/></d:resourcetype>
+ <d:getlastmodified>Sun, 27 Sep 2026 15:13:03 GMT</d:getlastmodified></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+ <d:propstat><d:prop><d:getcontentlength/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/mike/Tree/123/%c3%9cber%20uns/</d:href><d:propstat><d:prop>
+ <d:getetag>"e-dir"</d:getetag><oc:fileid>11</oc:fileid><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/mike/Tree/123/Mix%20%231.wav</d:href><d:propstat><d:prop>
+ <d:getetag>"e-file"</d:getetag><oc:fileid>12</oc:fileid><d:resourcetype/><d:getcontentlength>4096</d:getcontentlength>
+ <d:getlastmodified>Sat, 26 Sep 2026 08:00:00 GMT</d:getlastmodified></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PROPFIND" || r.Header.Get("Depth") != "1" {
+			t.Errorf("unexpected %s depth=%s", r.Method, r.Header.Get("Depth"))
+		}
+		if r.URL.EscapedPath() != "/remote.php/dav/files/mike/Tree/123" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = io.WriteString(w, listing)
+	}))
+	defer srv.Close()
+	c := newClient(srv)
+	got, err := c.ListDir(context.Background(), "/Tree/123/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DAVEntry{
+		{Path: "/Tree/123/", Dir: true, FileID: "10", ETag: "e-root", Modified: time.Date(2026, 9, 27, 15, 13, 3, 0, time.UTC)},
+		{Path: "/Tree/123/Über uns", Dir: true, FileID: "11", ETag: "e-dir"},
+		{Path: "/Tree/123/Mix #1.wav", FileID: "12", ETag: "e-file", Size: 4096, Modified: time.Date(2026, 9, 26, 8, 0, 0, 0, time.UTC)},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if g := got[i]; g.Path != want[i].Path || g.Dir != want[i].Dir || g.FileID != want[i].FileID ||
+			g.ETag != want[i].ETag || g.Size != want[i].Size || !g.Modified.Equal(want[i].Modified) {
+			t.Errorf("entry %d = %+v, want %+v", i, g, want[i])
+		}
+	}
+	if _, err := c.ListDir(context.Background(), "/Tree/gone"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing folder: %v, want ErrNotFound", err)
+	}
+}

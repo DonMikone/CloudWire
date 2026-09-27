@@ -19,6 +19,7 @@ import (
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
 	"github.com/DonMikone/CloudWire/core/internal/rcl"
+	"github.com/DonMikone/CloudWire/core/internal/selection"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
@@ -103,7 +104,7 @@ func remoteSize(remote, kind, remotePath string, files []string) (int64, error) 
 	if kind == "files" {
 		var n int64
 		for _, f := range files {
-			p := joinRemote(remotePath, f)
+			p := selection.Join(remotePath, f)
 			var st struct {
 				Item *struct {
 					IsDir bool  `json:"IsDir"`
@@ -280,11 +281,11 @@ func (e *Engine) mergeSelection(snapshot store.OfflineItem, entries []string) (D
 		return DTO{}, err
 	}
 	old := selectionOf(ex)
-	merged := mergeSelections(old, entries)
+	merged := selection.Merge(old, entries)
 	if slices.Equal(merged, old) {
 		return e.dtoLocked(ex), nil
 	}
-	added := uncovered(entries, old)
+	added := selection.Uncovered(entries, old)
 	applySelection(&ex, merged)
 	e.requestResyncLocked(&ex)
 	if err := e.st.UpdateOfflineItem(ex); err != nil {
@@ -449,7 +450,7 @@ func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, erro
 		defer e.mu.Unlock()
 		return e.dtoLocked(it), nil
 	}
-	gone := uncovered(old, next)
+	gone := selection.Uncovered(old, next)
 	existing, err := e.st.OfflineItems()
 	if err != nil {
 		return DTO{}, err
@@ -533,7 +534,7 @@ func (e *Engine) adjustSelectionLocked(it *store.OfflineItem, prune bool) bool {
 	}
 	next := kept
 	if len(added) > 0 {
-		next = mergeSelections(kept, added)
+		next = selection.Merge(kept, added)
 	}
 	probe := *it
 	applySelection(&probe, next)

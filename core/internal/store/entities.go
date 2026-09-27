@@ -43,6 +43,7 @@ type OfflineItem struct {
 	Advanced     map[string]any `json:"advanced"`
 	NeedsResync  bool           `json:"needsResync"`
 	RemoteETag   string         `json:"-"`
+	RootIno      uint64         `json:"-"` // inode of StoragePath; 0 = unknown
 	LastSyncAt   *int64         `json:"lastSyncAt"`
 	LastError    string         `json:"reason"`
 	State        string         `json:"state"`
@@ -213,15 +214,15 @@ func (s *Store) Mounts() ([]Mount, error) {
 // ---- Offline Items ----
 
 const offlineCols = `id,connection_id,kind,remote_path,files,storage_path,excludes,advanced,needs_resync,remote_etag,
-last_sync_at,last_error,state,created_at`
+last_sync_at,last_error,state,created_at,root_ino`
 
 func scanOffline(r interface{ Scan(...any) error }) (OfflineItem, error) {
 	var it OfflineItem
 	var files, excludes, advanced string
 	var etag, lastErr sql.NullString
-	var last sql.NullInt64
+	var last, ino sql.NullInt64
 	err := r.Scan(&it.ID, &it.ConnectionID, &it.Kind, &it.RemotePath, &files, &it.StoragePath, &excludes, &advanced,
-		&it.NeedsResync, &etag, &last, &lastErr, &it.State, &it.CreatedAt)
+		&it.NeedsResync, &etag, &last, &lastErr, &it.State, &it.CreatedAt, &ino)
 	if err != nil {
 		return it, notFound(err)
 	}
@@ -230,24 +231,25 @@ func scanOffline(r interface{ Scan(...any) error }) (OfflineItem, error) {
 	_ = json.Unmarshal([]byte(excludes), &it.Excludes)
 	_ = json.Unmarshal([]byte(advanced), &it.Advanced)
 	it.RemoteETag, it.LastError, it.LastSyncAt = etag.String, lastErr.String, ptrInt(last)
+	it.RootIno = uint64(ino.Int64)
 	return it, nil
 }
 
 // InsertOfflineItem stores a new Offline Item.
 func (s *Store) InsertOfflineItem(it OfflineItem) error {
-	_, err := s.db.Exec(`INSERT INTO offline_items(`+offlineCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO offline_items(`+offlineCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		it.ID, it.ConnectionID, it.Kind, it.RemotePath, mustJSON(nonNilStrings(it.Files)), it.StoragePath,
 		mustJSON(nonNilStrings(it.Excludes)), mustJSON(nonNilMap(it.Advanced)), boolInt(it.NeedsResync),
-		nullString(it.RemoteETag), nullInt(it.LastSyncAt), nullString(it.LastError), it.State, it.CreatedAt)
+		nullString(it.RemoteETag), nullInt(it.LastSyncAt), nullString(it.LastError), it.State, it.CreatedAt, int64(it.RootIno))
 	return err
 }
 
 // UpdateOfflineItem rewrites an Offline Item (except its remote ETag).
 func (s *Store) UpdateOfflineItem(it OfflineItem) error {
-	_, err := s.db.Exec(`UPDATE offline_items SET kind=?,files=?,storage_path=?,excludes=?,advanced=?,needs_resync=?,
-last_sync_at=?,last_error=?,state=? WHERE id=?`, it.Kind, mustJSON(nonNilStrings(it.Files)), it.StoragePath,
-		mustJSON(nonNilStrings(it.Excludes)), mustJSON(nonNilMap(it.Advanced)), boolInt(it.NeedsResync),
-		nullInt(it.LastSyncAt), nullString(it.LastError), it.State, it.ID)
+	_, err := s.db.Exec(`UPDATE offline_items SET kind=?,remote_path=?,files=?,storage_path=?,excludes=?,advanced=?,
+needs_resync=?,last_sync_at=?,last_error=?,state=?,root_ino=? WHERE id=?`, it.Kind, it.RemotePath,
+		mustJSON(nonNilStrings(it.Files)), it.StoragePath, mustJSON(nonNilStrings(it.Excludes)), mustJSON(nonNilMap(it.Advanced)),
+		boolInt(it.NeedsResync), nullInt(it.LastSyncAt), nullString(it.LastError), it.State, int64(it.RootIno), it.ID)
 	return err
 }
 
