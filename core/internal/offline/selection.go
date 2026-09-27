@@ -112,7 +112,7 @@ func hasBelow(entries []string, rel string) bool {
 }
 
 // relevant reports whether rel is synced: the root, a covered path, or a
-// parent folder of an entry (kept as structure).
+// parent folder of an entry (partially selected).
 func relevant(entries []string, rel string) bool {
 	return rel == "" || covers(entries, rel) || hasBelow(entries, rel)
 }
