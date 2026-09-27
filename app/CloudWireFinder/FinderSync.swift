@@ -307,8 +307,19 @@ final class FinderSync: FIFinderSync, @unchecked Sendable {
         }
     }
 
-    /// Menu actions arrive on the main thread.
-    @MainActor @objc private func performAction(_ sender: NSMenuItem) {
+    /// Finder calls menu actions on an XPC queue (crash on macOS 26, 2026-09-27); hop like menu(for:).
+    @objc private nonisolated func performAction(_ sender: NSMenuItem) {
+        nonisolated(unsafe) let sender = sender
+        let run = { MainActor.assumeIsolated { self.open(sender) } }
+        if Thread.isMainThread {
+            run()
+        } else {
+            DispatchQueue.main.sync(execute: run)
+        }
+    }
+
+    @MainActor
+    private func open(_ sender: NSMenuItem) {
         let names = ActionURL.Name.allCases
         guard names.indices.contains(sender.tag) else { return }
         let controller = FIFinderSyncController.default()
