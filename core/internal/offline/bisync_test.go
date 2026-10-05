@@ -107,6 +107,24 @@ func TestParseMassDelete(t *testing.T) {
 	}
 }
 
+func TestLostListings(t *testing.T) {
+	for _, tc := range []struct {
+		msg  string
+		want bool
+	}{
+		{"Bisync critical error: path1 and path2 are out of sync, run --resync to recover", true},
+		{"Bisync critical error: cannot find prior Path1 or Path2 listings, likely due to critical error on prior run", true},
+		{"Bisync aborted. Error is retryable without --resync due to --resilient mode.", false},
+		{"-          Path2 file not found in Path1      - Höhner/a.mp3", false},
+		{"too many deletes", false},
+		{"bisync aborted", false},
+	} {
+		if got := lostListings(tc.msg); got != tc.want {
+			t.Errorf("lostListings(%q) = %v, want %v", tc.msg, got, tc.want)
+		}
+	}
+}
+
 func TestDefaultStoragePath(t *testing.T) {
 	if got := DefaultStoragePath("/Users/mike/CloudWire", "My: Cloud/1", "Music/Live:Sets"); got != "/Users/mike/CloudWire/My- Cloud-1/Music/Live-Sets" {
 		t.Fatalf("got %q", got)

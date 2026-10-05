@@ -419,6 +419,10 @@ public struct CoreText: Sendable, Hashable {
             guard let name = a["name"] else { return nil }
             return String(localized: "Sync of “\(name)” failed", bundle: a.bundle)
         },
+        "sync.listingsLost": { a in
+            guard let name = a["name"] else { return nil }
+            return String(localized: "Sync state of “\(name)” was lost; both sides are compared again and deleted files may reappear", bundle: a.bundle)
+        },
         "pause.studioMode": { a in
             guard let app = a["app"] else { return nil }
             return String(localized: "Studio Mode (\(app))", bundle: a.bundle)

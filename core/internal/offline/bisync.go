@@ -55,6 +55,15 @@ func ParseMassDelete(text string) *MassDeleteInfo {
 	return nil
 }
 
+// lostListings reports whether a bisync log line says its listings are
+// unusable (rclone cmd/bisync operations.go). --recover cannot heal that:
+// backup listings that differ only in Unicode normalization (NFD on macOS,
+// NFC in the cloud) never validate. Only a resync rebuilds them.
+func lostListings(logMsg string) bool {
+	return strings.Contains(logMsg, "path1 and path2 are out of sync") ||
+		strings.Contains(logMsg, "cannot find prior Path1 or Path2 listings")
+}
+
 // ConflictSuffix returns bisync's conflictSuffix. Path1 (local) always wins
 // and keeps its name; the cloud version is saved as
 // "<name>.<label> 2006-01-02 1504.<ext>". The first element only has to

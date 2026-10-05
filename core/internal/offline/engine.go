@@ -116,6 +116,8 @@ type running struct {
 	files     map[string]string // path -> action
 	resyncGen int               // item resync generation when the run started
 	abort     string            // bisync safety abort log line (Mass-Delete Guard)
+	// bisync reported unusable listings: the next run resyncs
+	lostListings bool
 }
 
 type itemRT struct {
@@ -780,6 +782,11 @@ func (e *Engine) onLog(r *running, l sv.LogLine, label string) {
 				}
 				e.mu.Unlock()
 			}
+			if lostListings(l.Msg) {
+				e.mu.Lock()
+				r.lostListings = true
+				e.mu.Unlock()
+			}
 		}
 		e.log.Error("sync", subject, msg.New("rclone.error", "detail", l.Msg), map[string]string{"object": l.Object})
 	default:
@@ -971,6 +978,16 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 			e.publishItemLocked(it)
 		}
 	default:
+		if r.lostListings && !it.NeedsResync {
+			// rclone cannot recover these listings itself; a resync rebuilds them.
+			e.requestResyncLocked(&it)
+			it.State, it.LastError = StatePending, ""
+			_ = e.st.UpdateOfflineItem(it)
+			rt.retryAt = now
+			e.log.Warn("sync", it.ID, msg.New("sync.listingsLost", "name", name), map[string]any{"runId": r.runID})
+			e.publishItemLocked(it)
+			return
+		}
 		it.State, it.LastError = StateError, out.Error
 		_ = e.st.UpdateOfflineItem(it)
 		rt.retryAt = now.Add(5 * time.Minute)

@@ -144,11 +144,12 @@ var templates = map[string]string{
 	"offline.renameCollision":      "Cannot apply a rename: {path} already exists on the other side",
 	"offline.followed":             `Storage Location of "{name}" moved to {path}`,
 
-	"sync.done":       `Synced "{name}": {transferred} transferred, {deleted} deleted, {conflicts} conflicts`,
-	"sync.noChanges":  `Synced "{name}": no changes`,
-	"sync.conflicts":  `{count} conflict copies created in "{name}"`,
-	"sync.massDelete": `Mass-Delete Guard stopped "{name}"`,
-	"sync.failed":     `Sync of "{name}" failed`,
+	"sync.done":         `Synced "{name}": {transferred} transferred, {deleted} deleted, {conflicts} conflicts`,
+	"sync.noChanges":    `Synced "{name}": no changes`,
+	"sync.conflicts":    `{count} conflict copies created in "{name}"`,
+	"sync.massDelete":   `Mass-Delete Guard stopped "{name}"`,
+	"sync.failed":       `Sync of "{name}" failed`,
+	"sync.listingsLost": `Sync state of "{name}" was lost; both sides are compared again and deleted files may reappear`,
 
 	"pause.studioMode":         "Studio Mode ({app})",
 	"pause.battery":            "Battery power",

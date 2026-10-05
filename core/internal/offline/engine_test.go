@@ -360,6 +360,47 @@ func TestMassDeleteConfirmFlow(t *testing.T) {
 	}
 }
 
+func TestLostListingsResyncs(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	h.e.rt["a"].due = h.now
+	h.step()
+	outOfSync := sv.LogLine{Level: "error", Msg: "Bisync critical error: path1 and path2 are out of sync, run --resync to recover"}
+	h.started()[0].h.OnLog(outOfSync)
+	h.started()[0].complete(sv.StatusError, "sync/bisync: bisync aborted")
+	h.waitIdle()
+	if it := h.state("a"); it.State != StatePending || it.LastError != "" || !it.NeedsResync {
+		t.Fatalf("item after lost listings: %+v", it)
+	}
+	if len(h.notify.kinds) != 0 {
+		t.Fatalf("self-healing must not notify: %v", h.notify.kinds)
+	}
+	// The resync run starts right away, without the 5-minute retry delay.
+	h.step()
+	jobs := h.started()
+	if len(jobs) != 2 {
+		t.Fatalf("resync run did not start, got %d jobs", len(jobs))
+	}
+	var params map[string]any
+	_ = json.Unmarshal(jobs[1].job.Bisync, &params)
+	if params["resync"] != true || params["resyncMode"] != "newer" {
+		t.Fatalf("recovery must resync (newer): %v", params)
+	}
+	// A failing resync takes the normal error path: no resync loop.
+	jobs[1].h.OnLog(outOfSync)
+	jobs[1].complete(sv.StatusError, "sync/bisync: bisync aborted")
+	h.waitIdle()
+	if it := h.state("a"); it.State != StateError || !it.NeedsResync {
+		t.Fatalf("item after failed resync: %+v", it)
+	}
+	if len(h.notify.kinds) != 1 || h.notify.kinds[0] != "error" {
+		t.Fatalf("notifications %v", h.notify.kinds)
+	}
+	if got := h.e.rt["a"].retryAt; !got.Equal(h.now.Add(5 * time.Minute)) {
+		t.Fatalf("retryAt %v", got)
+	}
+}
+
 func massDeleteOf(t *testing.T, e *Engine, id string) *MassDeleteInfo {
 	t.Helper()
 	items, err := e.List()

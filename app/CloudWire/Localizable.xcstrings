@@ -6642,6 +6642,17 @@
         }
       }
     },
+    "Sync state of “%@” was lost; both sides are compared again and deleted files may reappear" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync-Stand von „%@“ ging verloren; beide Seiten werden neu abgeglichen, gelöschte Dateien können wiederkehren"
+          }
+        }
+      }
+    },
     "Sync stopped: “%@”" : {
       "localizations" : {
         "de" : {

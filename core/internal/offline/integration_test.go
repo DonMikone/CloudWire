@@ -306,3 +306,49 @@ func TestBisyncNestedSelectionMirrorsTree(t *testing.T) {
 		t.Fatal("a local file in a structure-only parent was uploaded")
 	}
 }
+
+// Issue #1: macOS stores umlauts as NFD, Nextcloud as NFC. Once bisync lost
+// its listings, --recover compared the backups byte by byte and failed with
+// "out of sync" on every run; only a resync recovers.
+func TestRecoverAfterNormalizationMismatch(t *testing.T) {
+	pr := newPair(t, "folder")
+	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	write(t, filepath.Join(pr.local, "Ho\u0308hner/Stell d'r vu\u0308r +Strophe/a.mp3"), "song", base)
+	write(t, filepath.Join(pr.cloud, "H\u00f6hner/Stell d'r v\u00fcr +Strophe/a.mp3"), "song", base)
+	for i := range 2 { // resync, then a normal run
+		if err := pr.sync(false); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	// rclone renames the listings to *-err after a critical error.
+	lists, err := filepath.Glob(filepath.Join(pr.p.BisyncWorkdir(pr.item.ID), "*.path[12].lst"))
+	if err != nil || len(lists) != 2 {
+		t.Fatalf("listings %v %v", lists, err)
+	}
+	for _, l := range lists {
+		if err := os.Remove(l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pr.sync(false); err == nil {
+		if names(t, pr.local)[0] == "H\u00f6hner" {
+			t.Skip("filesystem normalizes names")
+		}
+		t.Fatal("--recover healed the normalization mismatch; resync fallback may be obsolete")
+	}
+	logMu.Lock()
+	lost := slices.ContainsFunc(logLines, func(l sv.LogLine) bool { return lostListings(l.Msg) })
+	logMu.Unlock()
+	if !lost {
+		t.Fatal("no log line reports lost listings")
+	}
+	pr.item.NeedsResync = true
+	for i := range 2 { // the engine's resync, then a normal run
+		if err := pr.sync(false); err != nil {
+			t.Fatalf("after resync, run %d: %v", i, err)
+		}
+	}
+	if got := allFiles(t, pr.local); len(got) != 1 {
+		t.Fatalf("local files %v", got)
+	}
+}
