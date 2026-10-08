@@ -307,9 +307,14 @@ func TestBisyncNestedSelectionMirrorsTree(t *testing.T) {
 	}
 }
 
-// Issue #1: macOS stores umlauts as NFD, Nextcloud as NFC. Once bisync lost
-// its listings, --recover compared the backups byte by byte and failed with
-// "out of sync" on every run; only a resync recovers.
+// Issue #1: macOS stores umlauts as NFD, Nextcloud as NFC. Two bisync
+// defects turned a lost-listings situation into permanent failure:
+// (A) --recover compared the backup listings byte by byte while the
+// AliasMap was still empty and failed with "out of sync" on every run;
+// (B) a resync that hit the same names aborted on "hash is missing"
+// ("Unable to rollback during --resync"). With the patched fork under
+// core/third_party/rclone, --recover heals the lost listings itself and
+// the resync fallback stays as the second line of defense.
 func TestRecoverAfterNormalizationMismatch(t *testing.T) {
 	pr := newPair(t, "folder")
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -330,17 +335,13 @@ func TestRecoverAfterNormalizationMismatch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := pr.sync(false); err == nil {
-		if names(t, pr.local)[0] == "H\u00f6hner" {
-			t.Skip("filesystem normalizes names")
-		}
-		t.Fatal("--recover healed the normalization mismatch; resync fallback may be obsolete")
+	// Patch A: --recover validates the backup listings across the
+	// normalization twins and heals without a resync.
+	if err := pr.sync(false); err != nil {
+		t.Fatalf("--recover must heal the normalization mismatch: %v", err)
 	}
-	logMu.Lock()
-	lost := slices.ContainsFunc(logLines, func(l sv.LogLine) bool { return lostListings(l.Msg) })
-	logMu.Unlock()
-	if !lost {
-		t.Fatal("no log line reports lost listings")
+	if lostListingsInLog() {
+		t.Fatal("--recover fell back to a resync although the backups validate")
 	}
 	pr.item.NeedsResync = true
 	for i := range 2 { // the engine's resync, then a normal run
@@ -351,4 +352,10 @@ func TestRecoverAfterNormalizationMismatch(t *testing.T) {
 	if got := allFiles(t, pr.local); len(got) != 1 {
 		t.Fatalf("local files %v", got)
 	}
+}
+
+func lostListingsInLog() bool {
+	logMu.Lock()
+	defer logMu.Unlock()
+	return slices.ContainsFunc(logLines, func(l sv.LogLine) bool { return lostListings(l.Msg) })
 }

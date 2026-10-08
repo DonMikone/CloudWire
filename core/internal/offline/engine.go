@@ -126,6 +126,7 @@ type itemRT struct {
 	nextRemote     time.Time
 	nextSafety     time.Time
 	retryAt        time.Time
+	retryCount     int // consecutive failed runs; scales the retry backoff
 	pendingPaths   map[string]bool // absolute paths changed locally since the last ok run
 	duringRun      map[string]bool // relative paths changed while syncing
 	progress       *Progress
@@ -139,6 +140,23 @@ type itemRT struct {
 	// rootRename is a cloud root rename the next run applies first: the
 	// Storage Location of an item created before 0.3.0 was renamed.
 	rootRename *sv.RootRename
+}
+
+// backoff returns the retry delay after consecutive failed runs:
+// 1, 2, 5, 15, then 30 minutes. fails counts the failure that just happened.
+// The success path resets the count, so a single flaky failure retries in a
+// minute while a stubborn failure (e.g. a bisync resync loop) backs off
+// instead of hammering the Connection every minute.
+func (e *Engine) backoff(fails int) time.Duration {
+	steps := []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
+	i := fails - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(steps) {
+		i = len(steps) - 1
+	}
+	return steps[i]
 }
 
 // Progress is the offline.progress event payload.
@@ -888,6 +906,7 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		}
 		rt.pendingPaths = map[string]bool{}
 		rt.retryAt = time.Time{}
+		rt.retryCount = 0
 		rt.lastNotifiedEr = false
 		// Local changes during the run that were not caused by the sync itself.
 		leftover := foreignChanges(rt.duringRun, r.files)
@@ -959,7 +978,8 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 	case sv.StatusCollision:
 		it.State, it.LastError = StateError, renameCollisionPrefix+out.Error
 		_ = e.st.UpdateOfflineItem(it)
-		rt.retryAt = now.Add(5 * time.Minute)
+		rt.retryCount++
+		rt.retryAt = now.Add(e.backoff(rt.retryCount))
 		t := msg.New("offline.renameCollision", "path", out.Error)
 		e.log.Error("sync", it.ID, t, map[string]any{"runId": r.runID})
 		if !rt.lastNotifiedEr {
@@ -969,8 +989,10 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		e.publishItemLocked(it)
 	case sv.StatusStopped:
 		if !r.stopping {
-			// Stopped without our request: retry soon.
-			rt.retryAt = now.Add(time.Minute)
+			// Stopped without our request: retry soon, escalating if it
+			// keeps happening.
+			rt.retryCount++
+			rt.retryAt = now.Add(e.backoff(rt.retryCount))
 		}
 		if it.State == StateSyncing {
 			it.State = StatePending
@@ -990,7 +1012,8 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		}
 		it.State, it.LastError = StateError, out.Error
 		_ = e.st.UpdateOfflineItem(it)
-		rt.retryAt = now.Add(5 * time.Minute)
+		rt.retryCount++
+		rt.retryAt = now.Add(e.backoff(rt.retryCount))
 		t := msg.New("sync.failed", "name", name, "detail", out.Error)
 		e.log.Error("sync", it.ID, t, map[string]any{"runId": r.runID})
 		if !rt.lastNotifiedEr {
