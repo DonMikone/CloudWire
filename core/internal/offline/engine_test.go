@@ -386,7 +386,9 @@ func TestLostListingsResyncs(t *testing.T) {
 	if params["resync"] != true || params["resyncMode"] != "newer" {
 		t.Fatalf("recovery must resync (newer): %v", params)
 	}
-	// A failing resync takes the normal error path: no resync loop.
+	// A failing resync takes the normal error path (with retry backoff): no
+	// resync loop. NeedsResync stays set, so the next attempt resyncs again,
+	// only at an escalating interval.
 	jobs[1].h.OnLog(outOfSync)
 	jobs[1].complete(sv.StatusError, "sync/bisync: bisync aborted")
 	h.waitIdle()
@@ -396,8 +398,66 @@ func TestLostListingsResyncs(t *testing.T) {
 	if len(h.notify.kinds) != 1 || h.notify.kinds[0] != "error" {
 		t.Fatalf("notifications %v", h.notify.kinds)
 	}
-	if got := h.e.rt["a"].retryAt; !got.Equal(h.now.Add(5 * time.Minute)) {
+	// First consecutive failure: 1-minute backoff instead of the fixed 5.
+	if got := h.e.rt["a"].retryAt; !got.Equal(h.now.Add(h.e.backoff(1))) {
 		t.Fatalf("retryAt %v", got)
+	}
+}
+
+// Consecutive sync failures escalate the retry delay 1, 2, 5 minutes;
+// the first successful run resets the count.
+func TestFailedRunsBackOff(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	run := func() *fakeJob {
+		if err := h.e.SyncNow("a"); err != nil {
+			t.Fatal(err)
+		}
+		h.step()
+		jobs := h.started()
+		return jobs[len(jobs)-1]
+	}
+	// three failing runs in a row
+	for i, want := range []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute} {
+		jobs := run()
+		jobs.complete(sv.StatusError, "boom")
+		h.waitIdle()
+		wantAt := h.now.Add(want)
+		if got := h.e.rt["a"].retryAt; !got.Equal(wantAt) {
+			t.Fatalf("after failure %d: retryAt %v, want %v (retryCount %d)", i+1, got, wantAt, h.e.rt["a"].retryCount)
+		}
+		if got := h.e.rt["a"].retryCount; got != i+1 {
+			t.Fatalf("after failure %d: retryCount %d", i+1, got)
+		}
+		if it := h.state("a"); it.State != StateError {
+			t.Fatalf("after failure %d: state %s", i+1, it.State)
+		}
+	}
+	// the run after a success resets count and retryAt
+	jobs := run()
+	if len(h.started()) != 4 {
+		t.Fatalf("4th run did not start, %d jobs", len(h.started()))
+	}
+	jobs.complete(sv.StatusOK, "")
+	h.waitIdle()
+	if got := h.e.rt["a"].retryCount; got != 0 {
+		t.Fatalf("retryCount after success %d, want 0", got)
+	}
+	if got := h.e.rt["a"].retryAt; !got.IsZero() {
+		t.Fatalf("retryAt after success %v, want zero", got)
+	}
+	if it := h.state("a"); it.State != StateIdle {
+		t.Fatalf("state after success %s", it.State)
+	}
+	// a single new failure retries in 1 minute again
+	jobs = run()
+	if len(h.started()) != 5 {
+		t.Fatalf("5th run did not start, %d jobs", len(h.started()))
+	}
+	jobs.complete(sv.StatusError, "boom again")
+	h.waitIdle()
+	if got := h.e.rt["a"].retryAt; !got.Equal(h.now.Add(time.Minute)) {
+		t.Fatalf("retryAt after reset %v, want +1 minute", got)
 	}
 }
 
