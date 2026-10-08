@@ -4,6 +4,8 @@ go 1.26.0
 
 toolchain go1.26.5
 
+replace github.com/rclone/rclone => ./third_party/rclone
+
 require (
 	github.com/fsnotify/fsevents v0.2.0
 	github.com/mattn/go-sqlite3 v1.14.52
