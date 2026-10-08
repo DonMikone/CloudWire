@@ -21,6 +21,7 @@ import (
 	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/lib/atexit"
 	"github.com/rclone/rclone/lib/terminal"
+	"golang.org/x/text/unicode/norm"
 )
 
 // ErrBisyncAborted signals that bisync is aborted and forces non-zero exit code
@@ -285,6 +286,15 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 			if opt.CheckSync != CheckSyncFalse {
 				// Run CheckSync to ensure old listing is valid (garbage in, garbage out!)
 				fs.Infof(nil, "Validating backup listings for Path1 %s vs Path2 %s", quotePath(path1), quotePath(path2))
+				// CloudWire patch (see docs/adr/0012): fill the AliasMap from the
+				// backup listings. march pairs up normalization twins only for
+				// the entries of the current run, so b.aliases is still empty at
+				// this point and checkSync compares local NFD names byte-exact
+				// against cloud NFC names, failing every backup that is actually
+				// in sync. Upstream issue filed by CloudWire.
+				if err = b.fillAliasesFromListings(b.listing1+"-old", b.listing2+"-old"); err != nil {
+					fs.Debugf(nil, "failed to fill aliases from backup listings: %v", err)
+				}
 				if err = b.checkSync(b.listing1+"-old", b.listing2+"-old"); err != nil {
 					b.critical = true
 					b.retryable = true
@@ -456,6 +466,65 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 		}
 	}
 
+	return nil
+}
+
+// fillAliasesFromListings pairs names that differ only in Unicode
+// normalization (NFD on macOS, NFC in the cloud) between two listings and
+// adds them to the AliasMap, so byte-exact comparisons such as checkSync
+// validate backups from normalization-sensitive pairs of filesystems.
+// march (bisyncMarch.Match) fills b.aliases only for the entries of the
+// current run; during --recover no march has happened yet, so the backup
+// listings are the only source. Missing or unreadable listings are not an
+// error: the caller decides how to treat the files afterwards.
+//
+// CloudWire patch (see docs/adr/0012): Upstream issue filed by CloudWire.
+func (b *bisyncRun) fillAliasesFromListings(listing1, listing2 string) error {
+	files1, err := b.loadListing(listing1)
+	if err != nil {
+		return fmt.Errorf("cannot read listing of Path1: %w", err)
+	}
+	files2, err := b.loadListing(listing2)
+	if err != nil {
+		return fmt.Errorf("cannot read listing of Path2: %w", err)
+	}
+	ctx := b.fctx
+	ci := fs.GetConfig(ctx)
+	transform := func(s string) string {
+		if !ci.NoUnicodeNormalization {
+			s = norm.NFC.String(s)
+		}
+		// fs1/fs2 can be nil in direct unit tests; the real run always has
+		// both set, so only the guard branch matters here.
+		ci1, ci2 := false, false
+		if b.fs1 != nil {
+			ci1 = b.fs1.Features().CaseInsensitive
+		}
+		if b.fs2 != nil {
+			ci2 = b.fs2.Features().CaseInsensitive
+		}
+		if ci.IgnoreCaseSync || ci1 || ci2 {
+			s = strings.ToLower(s)
+		}
+		return s
+	}
+	byTransform2 := map[string]string{} // [transformedname]originalname
+	for _, name := range files2.list {
+		byTransform2[transform(name)] = name
+	}
+	added := 0
+	for _, name := range files1.list {
+		matchedName, found := byTransform2[transform(name)]
+		if !found || name == matchedName {
+			continue
+		}
+		// both sides carry the file; only its name differs
+		b.aliases.Add(name, matchedName)
+		added++
+	}
+	if added > 0 {
+		fs.Debugf(nil, "added %d aliases from backup listings", added)
+	}
 	return nil
 }
 

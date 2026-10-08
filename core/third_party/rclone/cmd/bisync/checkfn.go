@@ -189,10 +189,34 @@ func (b *bisyncRun) WhichEqual(ctx context.Context, src, dst fs.Object, Fsrc, Fd
 		return false
 	}
 	if noHash {
-		fs.Errorf(src, "failed to check as hash is missing")
-		return false
+		// CloudWire patch (see docs/adr/0012): fall back to size+modtime
+		// like operations.Equal, consistent with checkconflicts() which
+		// counts noHash files as matches. Aborting here made every
+		// --resync with hashless uploads (e.g. a webdav object written by
+		// another client without oc:checksums) unrecoverable via
+		// "Unable to rollback during --resync".
+		// Upstream issue filed by CloudWire.
+		fs.Infof(src, "hash is missing; falling back to size+modtime")
+		return b.noHashEqual(ctx, src, dst)
 	}
 	return !differ
+}
+
+// noHashEqual compares two objects by size and modtime only, for cases
+// where no side can provide a hash (WhichEqual's noHash fallback).
+// CloudWire patch (see docs/adr/0012): Upstream issue filed by CloudWire.
+func (b *bisyncRun) noHashEqual(ctx context.Context, src, dst fs.Object) bool {
+	same, ht, err := operations.CheckHashes(ctx, src, dst)
+	if err != nil {
+		fs.Debugf(src, "failed to compare hashes: %v", err)
+		return false
+	}
+	// hash.None: the two filesystems have no hash in common (or neither
+	// object can produce one) — size and modtime must decide.
+	if ht == hash.None {
+		return operations.Equal(ctx, src, dst)
+	}
+	return same
 }
 
 // Replaces the standard Equal func with one that also considers checksum
