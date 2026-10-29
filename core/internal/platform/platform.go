@@ -106,13 +106,14 @@ func CPUTicks() (busy, total uint64, err error) {
 	return busy, busy + uint64(idle), nil
 }
 
-// FreeBytes returns the bytes available to the user on path's volume.
-func FreeBytes(path string) (uint64, error) {
+// DiskSpace returns the bytes available to the user and the capacity of
+// path's volume.
+func DiskSpace(path string) (free, total uint64, err error) {
 	var st unix.Statfs_t
 	if err := unix.Statfs(path, &st); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return st.Bavail * uint64(st.Bsize), nil
+	return st.Bavail * uint64(st.Bsize), st.Blocks * uint64(st.Bsize), nil
 }
 
 // PathOfInode returns the current path of the file or folder with inode ino

@@ -252,6 +252,7 @@ type multistatus struct {
 				ETag          string `xml:"getetag"`
 				FileID        string `xml:"fileid"`
 				ContentLength string `xml:"getcontentlength"`
+				Size          string `xml:"size"`
 				LastModified  string `xml:"getlastmodified"`
 				ResourceType  struct {
 					Collection *struct{} `xml:"collection"`
@@ -317,6 +318,27 @@ func (c *Client) propfind(ctx context.Context, ocsPath, props, depth string) (mu
 		return ms, err
 	}
 	return ms, nil
+}
+
+// Size returns the size of a file or the total size of a folder below it
+// (oc:size, PROPFIND Depth 0). ErrNotFound if the path does not exist.
+func (c *Client) Size(ctx context.Context, ocsPath string) (int64, error) {
+	ms, err := c.propfind(ctx, ocsPath, `<oc:size/>`, "0")
+	if err != nil {
+		return 0, err
+	}
+	for _, r := range ms.Responses {
+		for _, ps := range r.Propstat {
+			if ps.Status != "" && !strings.Contains(ps.Status, " 200 ") || ps.Prop.Size == "" {
+				continue
+			}
+			if n, err := strconv.ParseInt(strings.TrimSpace(ps.Prop.Size), 10, 64); err == nil && n >= 0 {
+				return n, nil
+			}
+			return 0, fmt.Errorf("PROPFIND %s: no size", ocsPath)
+		}
+	}
+	return 0, fmt.Errorf("PROPFIND %s: no size", ocsPath)
 }
 
 // DAVEntry is a folder or file of a WebDAV listing.

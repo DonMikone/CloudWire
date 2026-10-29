@@ -48,6 +48,9 @@ The cloud version saved beside a file that changed locally and in the cloud sinc
 **Mass-Delete Guard** (UI: Massenlöschschutz):
 The stop that requires confirmation when a sync would delete more than half of an Offline Item.
 
+**Free Space Reserve** (UI: Speicherreserve):
+The share of a volume's capacity that should stay free after an Offline Item downloads its Selection; CloudWire warns before a Selection would cut into it.
+
 **Core**:
 The background service that owns Mounts, syncing, Shares, Vaults and the Activity Log.
 

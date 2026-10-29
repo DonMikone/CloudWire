@@ -2,19 +2,29 @@ package offline
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rclone/rclone/fs/config/obscure"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
+	"github.com/DonMikone/CloudWire/core/internal/rcl"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
@@ -693,7 +703,7 @@ func TestSetSelectionTrashesDeselected(t *testing.T) {
 	var trashed []string
 	moveToTrash = func(p string) error { trashed = append(trashed, p); return os.RemoveAll(p) }
 	t.Cleanup(func() { moveToTrash = platform.MoveToTrash })
-	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "a", Kind: "files", Files: []string{"x/"}}); err != nil {
+	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "a", Kind: "files", Files: []string{"x/"}, BaseKind: "folder"}); err != nil {
 		t.Fatal(err)
 	}
 	it := h.state("a")
@@ -711,12 +721,240 @@ func TestSetSelectionTrashesDeselected(t *testing.T) {
 		t.Fatalf("selected local copy gone: %v", err)
 	}
 	// Widening back to the whole root trashes nothing.
-	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "a", Kind: "folder"}); err != nil {
+	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "a", Kind: "folder", BaseKind: "files", BaseFiles: []string{"x"}}); err != nil {
 		t.Fatal(err)
 	}
 	if it := h.state("a"); it.Kind != "folder" || len(it.Files) != 0 || len(trashed) != 1 {
 		t.Fatalf("widened item %+v, trashed %v", it, trashed)
 	}
+}
+
+// addFilesItem stores a files item rooted at store/ with the given Selection.
+func (h *harness) addFilesItem(id string, needsResync bool, files ...string) store.OfflineItem {
+	h.t.Helper()
+	it := store.OfflineItem{ID: id, ConnectionID: "c1", Kind: "files", Files: files, NeedsResync: needsResync,
+		StoragePath: filepath.Join(h.dir, "store"), Excludes: store.DefaultSettings().DefaultExcludes, State: StateIdle}
+	if err := h.st.InsertOfflineItem(it); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := mkdir(it.StoragePath); err != nil {
+		h.t.Fatal(err)
+	}
+	h.e.mu.Lock()
+	h.e.itemRT(id)
+	h.e.mu.Unlock()
+	return it
+}
+
+// runOnce starts the due run of an item and completes it successfully.
+func (h *harness) runOnce(id string) {
+	h.t.Helper()
+	h.e.mu.Lock()
+	h.e.rt[id].due = h.now
+	h.e.mu.Unlock()
+	before := len(h.started())
+	h.step()
+	jobs := h.started()
+	if len(jobs) != before+1 || jobs[before].job.ID != id {
+		h.t.Fatalf("jobs %+v", jobs)
+	}
+	jobs[before].complete(sv.StatusOK, "")
+	h.waitIdle()
+	h.now = h.now.Add(time.Minute)
+}
+
+func TestSetSelectionKeepsEntriesJoinedMeanwhile(t *testing.T) {
+	h := newHarness(t)
+	it := h.addFilesItem("t", false, "T/B", "T/C", "T/New")
+	writeFiles(t, it.StoragePath, "T/B/b", "T/C/c", "T/New/n")
+	var trashed []string
+	moveToTrash = func(p string) error { trashed = append(trashed, p); return os.RemoveAll(p) }
+	t.Cleanup(func() { moveToTrash = platform.MoveToTrash })
+	// The sheet opened before T/New joined and only unchecked T/C.
+	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "t", Kind: "files", Files: []string{"T/B"},
+		BaseKind: "files", BaseFiles: []string{"T/B", "T/C"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.state("t").Files; !slices.Equal(got, []string{"T/B", "T/New"}) {
+		t.Fatalf("stored %q", got)
+	}
+	if !slices.Equal(trashed, []string{filepath.Join(it.StoragePath, "T/C")}) {
+		t.Fatalf("trashed %v", trashed)
+	}
+	if _, err := os.Stat(filepath.Join(it.StoragePath, "T/New/n")); err != nil {
+		t.Fatalf("joined entry trashed: %v", err)
+	}
+	if _, err := h.e.SetSelection(context.Background(), SelectionParams{ID: "t", Kind: "files", Files: []string{"T/B"}}); err == nil {
+		t.Fatal("an edit without its base must fail")
+	}
+}
+
+func TestUmlautAdditionJoinsInNFC(t *testing.T) {
+	h := newHarness(t)
+	it := h.addFilesItem("t", false, "T/B")
+	writeFiles(t, it.StoragePath, "T/B/b", "T/U\u0308bung/u") // Finder names are NFD
+	h.runOnce("t")
+	want := []string{"T/B", "T/\u00dcbung"}
+	if got := h.state("t").Files; !slices.Equal(got, want) {
+		t.Fatalf("after the first run %q", got)
+	}
+	filters, _ := os.ReadFile(paths.ForHome(h.dir).FiltersFile("t"))
+	if !strings.Contains(string(filters), "+ /T/{\u00dc,U\u0308}bung/**\n") {
+		t.Fatalf("filters %q", filters)
+	}
+	h.runOnce("t")
+	if got := h.state("t").Files; !slices.Equal(got, want) {
+		t.Fatalf("after the second run %q", got)
+	}
+}
+
+func TestRunRenewsFiltersHashAfterRuleUpdate(t *testing.T) {
+	for _, needsResync := range []bool{false, true} {
+		h := newHarness(t)
+		it := h.addFilesItem("t", needsResync, "\u00dcbung")
+		f := paths.ForHome(h.dir).FiltersFile("t")
+		old := "+ /\u00dcbung\n+ /\u00dcbung/**\n- **\n" // before the spelling-tolerant rules
+		oldSum := md5.Sum([]byte(old))
+		if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(f, []byte(old), 0o600)
+		_ = os.WriteFile(f+".md5", []byte(hex.EncodeToString(oldSum[:])), 0o600)
+		h.e.mu.Lock()
+		h.e.rt["t"].due = h.now
+		h.e.mu.Unlock()
+		h.step()
+		b, _ := os.ReadFile(f)
+		if string(b) != filtersContent(it) {
+			t.Fatalf("filters %q", b)
+		}
+		sum, _ := os.ReadFile(f + ".md5")
+		newSum := md5.Sum(b)
+		want := hex.EncodeToString(newSum[:])
+		if needsResync {
+			want = hex.EncodeToString(oldSum[:]) // the resync writes it
+		}
+		if string(sum) != want {
+			t.Fatalf("needsResync=%v: hash %s, want %s", needsResync, sum, want)
+		}
+	}
+}
+
+func TestSpaceVerdict(t *testing.T) {
+	const total = 1000
+	for _, c := range []struct {
+		name        string
+		remote      int64
+		free, total uint64
+		reserve     int
+		fits, low   bool
+		code        string
+	}{
+		{"exactly the free space", 500, 500, total, 0, true, false, ""},
+		{"larger than the free space", 501, 500, total, 10, false, false, "offline.insufficientSpace"},
+		{"exactly at the reserve", 400, 500, total, 10, true, false, ""},
+		{"one byte into the reserve", 401, 500, total, 10, true, true, "offline.lowSpace"},
+		{"reserve off", 499, 500, total, 0, true, false, ""},
+		{"capacity unknown", 499, 500, 0, 10, true, false, ""},
+	} {
+		fits, low, text := spaceVerdict(c.remote, c.free, c.total, c.reserve)
+		code := ""
+		if text != nil {
+			code = text.Code
+		}
+		if fits != c.fits || low != c.low || code != c.code {
+			t.Errorf("%s: fits=%v low=%v code=%q", c.name, fits, low, code)
+		}
+	}
+}
+
+// ncConns serves a Nextcloud Connection at url.
+type ncConns struct{ url string }
+
+func (ncConns) Get(id string) (store.Connection, error) {
+	return store.Connection{ID: id, Name: "NC", Kind: "remote", RcloneRemote: "cw-" + id, Provider: "webdav"}, nil
+}
+func (c ncConns) Config(store.Connection) (map[string]string, error) {
+	return map[string]string{"vendor": "nextcloud", "url": c.url + "/remote.php/dav/files/u", "user": "u", "pass": obscure.MustObscure("p")}, nil
+}
+
+func TestPreflightNextcloudSizeAndSupersede(t *testing.T) {
+	var block atomic.Bool
+	arrived := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Read first: the server notices a cancelled request only after its body.
+		body, _ := io.ReadAll(r.Body)
+		if block.CompareAndSwap(true, false) {
+			arrived <- struct{}{}
+			<-r.Context().Done()
+			return
+		}
+		if r.Method != "PROPFIND" || r.Header.Get("Depth") != "0" || !strings.Contains(string(body), "<oc:size/>") {
+			t.Errorf("unexpected %s depth=%s body=%s", r.Method, r.Header.Get("Depth"), body)
+		}
+		if r.URL.Path != "/remote.php/dav/files/u/A" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = io.WriteString(w, `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:response><d:href>/remote.php/dav/files/u/A/</d:href><d:propstat><d:prop><oc:size>12345</oc:size></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`)
+	}))
+	defer srv.Close()
+	h := newHarness(t)
+	h.e.Conns = ncConns{url: srv.URL}
+	p := PreflightParams{ConnectionID: "c1", Kind: "files", Files: []string{"A", "missing"}}
+	res, err := h.e.Preflight(context.Background(), p)
+	if err != nil || res.RemoteBytes != 12345 || !res.Fits || res.TotalBytes == 0 {
+		t.Fatalf("preflight %+v, %v", res, err)
+	}
+	// A new measurement cancels the one still waiting for the server.
+	block.Store(true)
+	first := make(chan error, 1)
+	go func() {
+		_, err := h.e.Preflight(context.Background(), p)
+		first <- err
+	}()
+	<-arrived
+	if _, err := h.e.Preflight(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-first:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("superseded preflight: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("superseded preflight still running")
+	}
+}
+
+func TestPreflightMeasuresWithRclone(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, "A/1.txt", "A/2.txt", "f.txt")
+	for name, content := range map[string]string{"A/1.txt": "abc", "A/2.txt": "defg", "f.txt": "12345"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := rcl.Call("config/create", map[string]any{"name": "sizes", "type": "alias", "parameters": map[string]any{"remote": dir}}); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t)
+	h.e.Conns = aliasConns{}
+	res, err := h.e.Preflight(context.Background(), PreflightParams{ConnectionID: "c1", Kind: "files", Files: []string{"A", "f.txt", "missing"}})
+	if err != nil || res.RemoteBytes != 12 {
+		t.Fatalf("preflight %+v, %v", res, err)
+	}
+}
+
+// aliasConns serves the rclone remote "sizes".
+type aliasConns struct{}
+
+func (aliasConns) Get(id string) (store.Connection, error) {
+	return store.Connection{ID: id, Name: "Sizes", Kind: "remote", RcloneRemote: "sizes", Provider: "alias"}, nil
+}
+func (aliasConns) Config(store.Connection) (map[string]string, error) {
+	return map[string]string{}, nil
 }
 
 func TestLocalAdditionsJoinTheSelection(t *testing.T) {

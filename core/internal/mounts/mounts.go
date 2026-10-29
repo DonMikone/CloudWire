@@ -86,6 +86,8 @@ type Service struct {
 
 	nfsOnce sync.Once
 	blocks  map[string]string // rclone option name -> vfs | mount | nfs
+
+	damper *logDamper
 }
 
 type run struct {
@@ -95,8 +97,9 @@ type run struct {
 	err        msg.Text      // zero = no error
 	stop       chan struct{} // closed to stop supervising
 	done       chan struct{} // closed when supervise returned
-	retrigger  chan struct{} // wakes a Mount parked in the error state
+	retrigger  chan struct{} // wakes a parked Mount or cuts a restart delay short
 	failures   []time.Time
+	reported   bool // the current failure streak was reported
 	mountedAt  time.Time
 	healthFail int
 	port       int // NFS server port (nfsmount)
@@ -105,7 +108,7 @@ type run struct {
 // New creates the service.
 func New(st *store.Store, log *activity.Logger, n Notifier, pub Publisher, p paths.Paths, configPass string, logLevel func() string) *Service {
 	return &Service{st: st, log: log, notify: n, pub: pub, paths: p, configPass: configPass, logLevel: logLevel,
-		runs: map[string]*run{}}
+		runs: map[string]*run{}, damper: &logDamper{window: time.Hour}}
 }
 
 // FuseStatus reports which FUSE implementations are installed.
@@ -547,8 +550,8 @@ func relativeTo(p, root string) (string, bool) {
 	return "", false
 }
 
-// Retrigger restarts Mounts parked in the error state and health-checks the
-// others (wake, network change, user action).
+// Retrigger restarts parked Mounts, retries failing Mounts at once and
+// health-checks the others (wake, network change, user action).
 func (s *Service) Retrigger() {
 	s.mu.Lock()
 	for _, r := range s.runs {
@@ -738,6 +741,16 @@ func freePort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
+// portFree reports whether a localhost TCP port can be listened on.
+func portFree(port int) bool {
+	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = l.Close()
+	return true
+}
+
 func (s *Service) supervise(r *run) {
 	backoff := time.Second
 	port := 0
@@ -794,7 +807,12 @@ func (s *Service) supervise(r *run) {
 			}
 			continue
 		}
-		s.setState(r, StateMounting, msg.Text{})
+		s.mu.Lock()
+		reported := r.reported
+		s.mu.Unlock()
+		if !reported {
+			s.setState(r, StateMounting, msg.Text{})
+		}
 		// Carries the worker's warning ("" = none) of the "mounted" message.
 		mounted := make(chan string, 1)
 		w, err := sv.Spawn(job, sv.Secrets{ConfigPass: s.configPass}, sv.Handlers{
@@ -845,8 +863,10 @@ func (s *Service) supervise(r *run) {
 				s.log.Warn("mount", r.m.ID, msg.New("mount.servedFromLocalhost", "name", r.m.VolumeName, "detail", warning), nil)
 			}
 		case <-w.Done():
-			if reattach {
-				// The port could not be served again: start over with a fresh mount.
+			if reattach && !portFree(port) {
+				// Another process took the port, so start over. Otherwise keep
+				// the kernel mount; the next worker serves the port again, e.g.
+				// once the cloud is reachable.
 				attachedBefore = false
 			}
 		case <-r.stop:
@@ -884,13 +904,15 @@ func (s *Service) supervise(r *run) {
 	}
 }
 
-// failed applies the restart policy. It returns false when supervision ends.
-func (s *Service) failed(r *run, backoff *time.Duration) bool {
-	now := time.Now()
-	s.mu.Lock()
+// recordFailure notes a failed attempt at now (caller holds s.mu). A Mount that
+// stayed mounted for 5 minutes starts a new streak (failures, reported and
+// backoff reset). It reports true once per streak: when 5 failures fall
+// within 10 minutes.
+func (r *run) recordFailure(now time.Time, backoff *time.Duration) bool {
 	if !r.mountedAt.IsZero() && now.Sub(r.mountedAt) >= 5*time.Minute {
 		*backoff = time.Second
 		r.failures = nil
+		r.reported = false
 	}
 	r.mountedAt = time.Time{}
 	r.failures = append(r.failures, now)
@@ -901,24 +923,30 @@ func (s *Service) failed(r *run, backoff *time.Duration) bool {
 		}
 	}
 	r.failures = recent
-	tooMany := len(recent) >= 5
+	if len(recent) >= 5 && !r.reported {
+		r.reported = true
+		return true
+	}
+	return false
+}
+
+// failed applies the restart policy: it never gives up, reports a failure
+// streak once and retries at least every 60 s. It returns false when
+// supervision ends.
+func (s *Service) failed(r *run, backoff *time.Duration) bool {
+	s.mu.Lock()
+	report := r.recordFailure(time.Now(), backoff)
+	reported := r.reported
 	errText := r.err
 	s.mu.Unlock()
-	if tooMany {
+	if reported {
+		// Keep showing why while retrying.
 		s.setState(r, StateError, errText)
+	}
+	if report {
 		t := msg.New("mount.failedRepeatedly", "name", r.m.VolumeName).Because(errText)
 		s.log.Error("mount", r.m.ID, t, nil)
 		s.notify.Notify(notify.KindError, notify.ErrorParams(r.m.VolumeName, r.m.ID, t))
-		select {
-		case <-r.stop:
-			return false
-		case <-r.retrigger:
-			s.mu.Lock()
-			r.failures = nil
-			s.mu.Unlock()
-			*backoff = time.Second
-			return true
-		}
 	}
 	t := time.NewTimer(*backoff)
 	defer t.Stop()
@@ -929,6 +957,7 @@ func (s *Service) failed(r *run, backoff *time.Duration) bool {
 	case <-t.C:
 		return true
 	case <-r.retrigger:
+		*backoff = time.Second
 		return true
 	}
 }
@@ -938,12 +967,47 @@ var benign = []string{
 	"failing create to indicate lack of support for 'exclusive' mode",
 }
 
+// logDamper lets each distinct key pass at most once per window, so a
+// recurring rclone error (e.g. Finder polling a stale NFS handle every 5 s)
+// does not flood the Activity Log.
+type logDamper struct {
+	mu     sync.Mutex
+	window time.Duration
+	last   map[string]time.Time
+}
+
+func (d *logDamper) allow(key string, now time.Time) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if t, ok := d.last[key]; ok && now.Sub(t) < d.window {
+		return false
+	}
+	if d.last == nil {
+		d.last = map[string]time.Time{}
+	}
+	if len(d.last) >= 1024 {
+		for k, t := range d.last {
+			if now.Sub(t) >= d.window {
+				delete(d.last, k)
+			}
+		}
+		if len(d.last) >= 1024 {
+			clear(d.last)
+		}
+	}
+	d.last[key] = now
+	return true
+}
+
 func (s *Service) onLog(m store.Mount, l sv.LogLine) {
 	level := l.Level
 	for _, b := range benign {
 		if strings.Contains(l.Msg, b) {
 			level = "debug"
 		}
+	}
+	if (level == "error" || level == "critical") && !s.damper.allow(m.ID+"\x00"+l.Msg, time.Now()) {
+		level = "debug"
 	}
 	switch level {
 	case "error", "critical":
@@ -970,9 +1034,10 @@ func (s *Service) healthLoop(cancel <-chan struct{}) {
 	}
 }
 
-// healthCheck asks every mounted worker for stats and probes its NFS server.
-// Overlapping calls (timer, wake and network change at once) are skipped so
-// one slow round is never counted twice.
+// healthCheck pings every mounted worker and probes its NFS server. A probe
+// never touches the cloud: a slow cloud makes NFS requests slow, not the
+// worker dead. Overlapping calls (timer, wake and network change at once) are
+// skipped so one slow round is never counted twice.
 func (s *Service) healthCheck() {
 	if !s.healthRunning.CompareAndSwap(false, true) {
 		return
@@ -994,7 +1059,7 @@ func (s *Service) healthCheck() {
 	for _, c := range check {
 		r, w := c.r, c.w
 		ok := true
-		if _, err := w.Stats(5 * time.Second); err != nil {
+		if err := w.Ping(5 * time.Second); err != nil {
 			ok = false
 		} else if r.m.MountType == "nfsmount" && !serverResponds(c.port, 5*time.Second) {
 			ok = false
@@ -1007,7 +1072,7 @@ func (s *Service) healthCheck() {
 		}
 		fails := r.healthFail
 		s.mu.Unlock()
-		if fails >= 2 {
+		if fails >= healthMisses {
 			s.log.Warn("mount", r.m.ID, msg.New("mount.notResponding", "name", r.m.VolumeName), nil)
 			w.Kill()
 			if r.m.MountType != "nfsmount" && IsOwnMount(r.m.MountPoint) {
@@ -1017,6 +1082,9 @@ func (s *Service) healthCheck() {
 		}
 	}
 }
+
+// healthMisses is how many health checks in a row a Mount may miss.
+const healthMisses = 3
 
 // serverResponds checks that a Mount's NFS server accepts connections. The
 // Core never touches paths inside a Mount: that would need the "Network

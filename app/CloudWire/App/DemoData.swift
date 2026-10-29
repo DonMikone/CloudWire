@@ -316,9 +316,18 @@ enum DemoData {
     }
 
     static func preflightJSON(remotePath: String, lowSpace: Bool) -> String {
-        json(["remoteBytes": lowSpace ? 412_316_860_416 : 1_288_490_188,
-              "freeBytes": lowSpace ? 96_636_764_160 : 412_316_860_416, "storageNonEmpty": false,
-              "storagePath": "/Users/mike/CloudWire/Nextcloud/\(remotePath)"])
+        var result: [String: Any] = [
+            "remoteBytes": lowSpace ? 412_316_860_416 : 1_288_490_188,
+            "freeBytes": lowSpace ? 96_636_764_160 : 412_316_860_416, "totalBytes": 994_662_584_320,
+            "storageNonEmpty": false, "storagePath": "/Users/mike/CloudWire/Nextcloud/\(remotePath)",
+            "fits": !lowSpace, "lowSpace": false,
+        ]
+        if lowSpace {
+            result["space"] = ["code": "offline.insufficientSpace",
+                               "params": ["neededBytes": "412316860416", "freeBytes": "96636764160"],
+                               "message": "Not enough free space: 384.0 GiB needed, 90.0 GiB available"]
+        }
+        return json(result)
     }
 
     // MARK: rclone metadata

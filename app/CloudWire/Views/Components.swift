@@ -225,6 +225,18 @@ struct PasswordField: View {
     }
 }
 
+/// Info or a warning (not an error), e.g. a share notice or low disk space.
+struct InlineNotice: View {
+    let message: String
+
+    var body: some View {
+        Label(message, systemImage: "exclamationmark.triangle")
+            .foregroundStyle(.orange)
+            .font(.callout)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// Inline error text. `detail` is raw rclone or OS text, shown small and selectable below.
 struct InlineError: View {
     let message: String

@@ -273,7 +273,7 @@ struct ShareWindow: View {
 
     @ViewBuilder
     private var messages: some View {
-        if let notice { ShareNotice(message: notice) }
+        if let notice { InlineNotice(message: notice) }
         if let error { InlineError(message: error) }
     }
 
@@ -619,7 +619,7 @@ struct ShareWindow: View {
             do {
                 let result = try await model.client.deleteShare(connectionId: connectionId, id: share.id)
                 shares.removeAll { $0.id == share.id }
-                if result.remoteStillActive { notice = ShareNotice.stillActive }
+                if result.remoteStillActive { notice = InlineNotice.stillActive }
             } catch {
                 let alert = ErrorText.alert(for: error)
                 self.error = "\(alert.title): \(alert.message)"
@@ -628,20 +628,10 @@ struct ShareWindow: View {
     }
 }
 
-/// Info (not an error) shown above or below the shares.
-struct ShareNotice: View {
-    let message: String
-
+extension InlineNotice {
     /// A deleted rclone link the provider still serves.
     static var stillActive: String {
         String(localized: "Removed from CloudWire; still active at the provider – please remove it on the web.")
-    }
-
-    var body: some View {
-        Label(message, systemImage: "exclamationmark.triangle")
-            .foregroundStyle(.orange)
-            .font(.callout)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

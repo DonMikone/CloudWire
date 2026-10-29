@@ -20,7 +20,7 @@ private let sampleParams: [String: String] = [
     "version": "9.8.7", "label": "Lb6", "count": "7", "provider": "Pv8", "server": "https://sv9.example",
     "user": "Us10", "url": "Ur11", "folder": "Fo12.cwvault", "app": "Ap13", "percent": "73", "method": "Me14",
     "files": "Fi15, Fi16", "neededBytes": "3221225472", "freeBytes": "536870912", "untilMs": "1790613000000",
-    "transferred": "41", "deleted": "53", "conflicts": "67",
+    "transferred": "41", "deleted": "53", "conflicts": "67", "freeAfterBytes": "1610612736", "reservePercent": "17",
 ]
 
 @Suite("Core texts")
@@ -146,5 +146,27 @@ struct CoreTextTests {
         #expect(CoreError(code: "core.internal", message: "boom").text == nil)
         #expect(CoreError.timeout("mounts.list").text?.localized(bundle: de)
             == "Der Hintergrunddienst von CloudWire hat mounts.list nicht rechtzeitig beantwortet.")
+    }
+
+    @Test("preflight carries its space verdict as a Core text")
+    func preflightSpace() throws {
+        let de = try strings("de")
+        let blocked = try decode(PreflightResult.self, #"""
+            {"remoteBytes":3221225472,"freeBytes":536870912,"totalBytes":994662584320,"fits":false,
+             "lowSpace":false,"storageNonEmpty":false,"storagePath":"/s",
+             "space":{"code":"offline.insufficientSpace","params":{"neededBytes":"3221225472","freeBytes":"536870912"},
+                      "message":"Not enough free space"}}
+            """#)
+        #expect(blocked.fits == false)
+        let needed = ByteCountFormatter.string(fromByteCount: 3_221_225_472, countStyle: .file)
+        let german = try #require(blocked.space?.localized(bundle: de))
+        #expect(german.contains(needed))
+        #expect(german.hasPrefix("Nicht genug freier Speicher"))
+        let fine = try decode(PreflightResult.self, #"""
+            {"remoteBytes":1,"freeBytes":2,"totalBytes":3,"fits":true,"lowSpace":false,
+             "storageNonEmpty":false,"storagePath":"/s"}
+            """#)
+        #expect(fine.space == nil)
+        #expect(fine.fits)
     }
 }

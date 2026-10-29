@@ -313,3 +313,31 @@ func TestListDir(t *testing.T) {
 		t.Fatalf("missing folder: %v, want ErrNotFound", err)
 	}
 }
+
+func TestSizeViaPropfind(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != "PROPFIND" || r.Header.Get("Depth") != "0" || !strings.Contains(string(body), "<oc:size/>") {
+			t.Errorf("unexpected %s depth=%s body=%s", r.Method, r.Header.Get("Depth"), body)
+		}
+		size := map[string]string{"/remote.php/dav/files/mike/Tree": "12345", "/remote.php/dav/files/mike/Bad": "-1"}[r.URL.Path]
+		if size == "" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = io.WriteString(w, `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:response><d:href>/x/</d:href><d:propstat><d:prop><oc:size>`+
+			size+`</oc:size></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`)
+	}))
+	defer srv.Close()
+	c := newClient(srv)
+	if n, err := c.Size(context.Background(), "/Tree"); err != nil || n != 12345 {
+		t.Fatalf("size %d, %v", n, err)
+	}
+	if _, err := c.Size(context.Background(), "/gone"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing path: %v, want ErrNotFound", err)
+	}
+	if _, err := c.Size(context.Background(), "/Bad"); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("negative size: %v", err)
+	}
+}

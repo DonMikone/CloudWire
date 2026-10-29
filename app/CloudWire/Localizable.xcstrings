@@ -1216,6 +1216,16 @@
         }
       }
     },
+    "Calculating cloud size…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud-Größe wird berechnet…"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "localizations" : {
         "de" : {
@@ -2487,6 +2497,16 @@
         }
       }
     },
+    "Disk Space" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speicherplatz"
+          }
+        }
+      }
+    },
     "Don't Delete – Restore Files" : {
       "localizations" : {
         "de" : {
@@ -3220,6 +3240,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Format:"
+          }
+        }
+      }
+    },
+    "Free space reserve" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speicherreserve"
           }
         }
       }
@@ -4541,16 +4571,6 @@
         }
       }
     },
-    "Not enough free space" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nicht genug freier Speicher"
-          }
-        }
-      }
-    },
     "Not enough free space: %@ needed, %@ available" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4558,16 +4578,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nicht genug freier Speicher: %1$@ nötig, %2$@ verfügbar"
-          }
-        }
-      }
-    },
-    "Not enough free space: about %@ needed, %@ free. Use “Change…” to choose a storage location on another volume." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nicht genug freier Speicher: etwa %1$@ nötig, %2$@ frei. Wähle über „Ändern…“ einen Speicherort auf einem anderen Volume."
           }
         }
       }
@@ -4792,6 +4802,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ein Muster pro Zeile. Gilt für neue Offline-Elemente."
+          }
+        }
+      }
+    },
+    "Only %@ would stay free on this volume, less than the free space reserve of %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nur noch %1$@ wären auf diesem Volume frei – weniger als die Speicherreserve von %2$@"
           }
         }
       }
@@ -7932,6 +7953,16 @@
         }
       }
     },
+    "Use “Change…” to choose a storage location on another volume." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle mit „Ändern…“ einen Speicherort auf einem anderen Volume."
+          }
+        }
+      }
+    },
     "User" : {
       "localizations" : {
         "de" : {
@@ -8246,6 +8277,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Warnung"
+          }
+        }
+      }
+    },
+    "Warns before making items available offline would leave less free space on the volume. 0 % turns the warning off." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warnt, bevor Offline-Elemente weniger freien Platz auf dem Volume übrig lassen würden. 0 % schaltet die Warnung aus."
           }
         }
       }

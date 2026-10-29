@@ -26,6 +26,11 @@ type Settings struct {
 	Log                   LogSettings          `json:"log"`
 	Updates               UpdateSettings       `json:"updates"`
 	ConflictLabel         string               `json:"conflictLabel"`
+
+	// FreeSpaceReservePercent is the Free Space Reserve: the share of a
+	// volume's capacity that should stay free after an Offline Item
+	// downloads its Selection.
+	FreeSpaceReservePercent int `json:"freeSpaceReservePercent"`
 }
 
 // PauseRulesSettings configures the Pause Rules.
@@ -108,6 +113,8 @@ func DefaultSettings() Settings {
 		Notifications: NotificationSettings{Errors: true, Conflicts: true, MassDelete: true, LinkCopied: true},
 		Log:           LogSettings{Level: "info", RetentionDays: 30, MaxMB: 50},
 		Updates:       UpdateSettings{Check: true},
+
+		FreeSpaceReservePercent: 10,
 	}
 }
 
@@ -226,6 +233,8 @@ func (st Settings) Validate() error {
 		return fmt.Errorf("cpu threshold must be 1-100")
 	case st.Bandwidth.UploadMiBps < 0 || st.Bandwidth.DownloadMiBps < 0:
 		return fmt.Errorf("bandwidth must not be negative")
+	case st.FreeSpaceReservePercent < 0 || st.FreeSpaceReservePercent > 50:
+		return fmt.Errorf("free space reserve must be 0-50%%")
 	case st.DefaultCacheMaxGB < 1:
 		return fmt.Errorf("cache size must be at least 1 GB")
 	case st.DefaultMountType != "nfsmount" && st.DefaultMountType != "cmount":

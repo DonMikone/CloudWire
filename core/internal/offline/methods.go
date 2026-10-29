@@ -7,19 +7,24 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/cache"
+	"github.com/rclone/rclone/fs/operations"
+
 	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
-	"github.com/DonMikone/CloudWire/core/internal/rcl"
 	"github.com/DonMikone/CloudWire/core/internal/selection"
+	"github.com/DonMikone/CloudWire/core/internal/sharing/nextcloud"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
@@ -61,8 +66,14 @@ type PreflightParams struct {
 type PreflightResult struct {
 	RemoteBytes     int64  `json:"remoteBytes"`
 	FreeBytes       uint64 `json:"freeBytes"`
+	TotalBytes      uint64 `json:"totalBytes"` // capacity of the volume
+	Fits            bool   `json:"fits"`
+	LowSpace        bool   `json:"lowSpace"`
 	StorageNonEmpty bool   `json:"storageNonEmpty"`
 	StoragePath     string `json:"storagePath"`
+	// Space explains why the Selection does not fit or cuts into the Free
+	// Space Reserve (nil when neither).
+	Space *msg.Text `json:"space,omitempty"`
 }
 
 func (e *Engine) resolveStorage(conn store.Connection, remotePath, given string) (string, error) {
@@ -76,8 +87,18 @@ func (e *Engine) resolveStorage(conn store.Connection, remotePath, given string)
 	return p, nil
 }
 
-// Preflight measures the remote size and the local free space.
+// Preflight measures the remote size and the local free space and judges
+// whether the Selection fits. The App measures one Selection at a time, so a
+// new measurement cancels the previous one.
 func (e *Engine) Preflight(ctx context.Context, p PreflightParams) (PreflightResult, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	e.preflightMu.Lock()
+	if e.preflightCancel != nil {
+		e.preflightCancel()
+	}
+	e.preflightCancel = cancel
+	e.preflightMu.Unlock()
+	defer cancel()
 	conn, err := e.Conns.Get(p.ConnectionID)
 	if err != nil {
 		return PreflightResult{}, err
@@ -91,63 +112,109 @@ func (e *Engine) Preflight(ctx context.Context, p PreflightParams) (PreflightRes
 		return PreflightResult{}, err
 	}
 	res := PreflightResult{StoragePath: sp}
-	res.RemoteBytes, err = remoteSize(conn.RcloneRemote, p.Kind, remotePath, p.Files)
+	res.RemoteBytes, err = e.remoteSize(ctx, conn, p.Kind, remotePath, p.Files)
 	if err != nil {
+		if ctx.Err() != nil {
+			return PreflightResult{}, ctx.Err()
+		}
 		return res, api.Wrap("connection.testFailed", err)
 	}
-	res.FreeBytes = freeBytesNear(sp)
+	res.FreeBytes, res.TotalBytes = spaceNear(sp)
+	res.Fits, res.LowSpace, res.Space = spaceVerdict(res.RemoteBytes, res.FreeBytes, res.TotalBytes, e.settings().FreeSpaceReservePercent)
 	res.StorageNonEmpty = storageNonEmpty(sp, p.Kind, p.Files)
 	return res, nil
 }
 
-func remoteSize(remote, kind, remotePath string, files []string) (int64, error) {
-	if kind == "files" {
-		var n int64
+// remoteSize measures a Selection in the cloud: Nextcloud and ownCloud tell
+// a folder's size in one request, other providers are listed by rclone.
+func (e *Engine) remoteSize(ctx context.Context, conn store.Connection, kind, remotePath string, files []string) (int64, error) {
+	entries := []string{remotePath}
+	if kind != "folder" {
+		entries = make([]string, 0, len(files))
 		for _, f := range files {
-			p := selection.Join(remotePath, f)
-			var st struct {
-				Item *struct {
-					IsDir bool  `json:"IsDir"`
-					Size  int64 `json:"Size"`
-				} `json:"item"`
-			}
-			if err := rcl.CallInto("operations/stat", map[string]any{"fs": remote + ":", "remote": p}, &st); err != nil {
-				return 0, err
-			}
+			entries = append(entries, selection.Join(remotePath, f))
+		}
+	}
+	dav, root, ok := e.nextcloudDAV(conn)
+	var total int64
+	for _, p := range entries {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		if ok {
+			n, err := dav.Size(ctx, nextcloud.JoinPath(root, p))
 			switch {
-			case st.Item == nil:
-			case st.Item.IsDir:
-				bytes, err := folderSize(remote, p)
-				if err != nil {
-					return 0, err
-				}
-				n += bytes
-			case st.Item.Size > 0:
-				n += st.Item.Size
+			case errors.Is(err, nextcloud.ErrNotFound):
+				continue
+			case err == nil:
+				total += n
+				continue
+			case ctx.Err() != nil:
+				return 0, ctx.Err()
 			}
 		}
-		return n, nil
+		n, err := rcloneSize(ctx, conn.RcloneRemote, p)
+		if err != nil {
+			return 0, err
+		}
+		total += n
 	}
-	return folderSize(remote, remotePath)
+	return total, nil
 }
 
-func folderSize(remote, p string) (int64, error) {
-	var res struct {
-		Bytes int64 `json:"bytes"`
+// rcloneSize measures a file or folder with rclone (a full listing).
+func rcloneSize(ctx context.Context, remote, p string) (int64, error) {
+	f, err := cache.Get(ctx, remote+":"+p)
+	if errors.Is(err, fs.ErrorIsFile) {
+		// f is the parent folder.
+		o, err := f.NewObject(ctx, path.Base(p))
+		if errors.Is(err, fs.ErrorObjectNotFound) {
+			return 0, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		return max(o.Size(), 0), nil
 	}
-	if err := rcl.CallInto("operations/size", map[string]any{"fs": remote + ":" + p}, &res); err != nil {
+	if err != nil {
 		return 0, err
 	}
-	return max(res.Bytes, 0), nil
+	_, n, _, err := operations.Count(ctx, f)
+	if errors.Is(err, fs.ErrorDirNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return max(n, 0), nil
 }
 
-func freeBytesNear(p string) uint64 {
+// spaceVerdict judges a Selection's cloud size against its volume: it does
+// not fit when larger than the free space; it cuts into the Free Space
+// Reserve when less than reservePercent of the capacity would stay free.
+func spaceVerdict(remote int64, free, total uint64, reservePercent int) (fits, low bool, text *msg.Text) {
+	need := uint64(max(remote, 0))
+	if need > free {
+		t := msg.New("offline.insufficientSpace", "neededBytes", need, "freeBytes", free)
+		return false, false, &t
+	}
+	after := free - need
+	if total > 0 && reservePercent > 0 && after*100 < total*uint64(reservePercent) {
+		t := msg.New("offline.lowSpace", "freeAfterBytes", after, "reservePercent", reservePercent)
+		return true, true, &t
+	}
+	return true, false, nil
+}
+
+// spaceNear returns the free space and capacity of the volume of p or of its
+// nearest existing parent.
+func spaceNear(p string) (free, total uint64) {
 	for d := p; ; d = filepath.Dir(d) {
-		if n, err := platform.FreeBytes(d); err == nil {
-			return n
+		if free, total, err := platform.DiskSpace(d); err == nil {
+			return free, total
 		}
 		if d == "/" || d == "." {
-			return 0
+			return 0, 0
 		}
 	}
 }
@@ -231,16 +298,7 @@ func (e *Engine) Create(ctx context.Context, p CreateParams) (DTO, error) {
 	if v.mergeInto != nil {
 		return e.mergeSelection(*v.mergeInto, selectionOf(it))
 	}
-	pre, err := e.Preflight(ctx, PreflightParams{ConnectionID: conn.ID, Kind: it.Kind, RemotePath: it.RemotePath, Files: it.Files, StoragePath: it.StoragePath})
-	if err != nil {
-		return DTO{}, err
-	}
-	if float64(pre.FreeBytes) < 1.1*float64(pre.RemoteBytes) {
-		return DTO{}, api.Fail("offline.insufficientSpace", msg.New("offline.insufficientSpace",
-			"neededBytes", uint64(float64(pre.RemoteBytes)*1.1), "freeBytes", pre.FreeBytes)).
-			WithData("remoteBytes", pre.RemoteBytes).WithData("freeBytes", pre.FreeBytes)
-	}
-	if pre.StorageNonEmpty && !p.MergeExisting {
+	if storageNonEmpty(it.StoragePath, it.Kind, it.Files) && !p.MergeExisting {
 		return DTO{}, api.Fail("offline.storageNotEmpty", msg.New("folder.notEmpty", "path", it.StoragePath))
 	}
 	if p.Excludes != nil {
@@ -421,30 +479,47 @@ func (e *Engine) Relocate(ctx context.Context, id, newPath string) (DTO, error) 
 	return e.restartItem(it), nil
 }
 
-// SelectionParams are offline.setSelection params.
+// SelectionParams are offline.setSelection params. Base is the Selection the
+// App showed when editing started.
 type SelectionParams struct {
-	ID    string   `json:"id"`
-	Kind  string   `json:"kind"`
-	Files []string `json:"files"`
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind"`
+	Files     []string `json:"files"`
+	BaseKind  string   `json:"baseKind"`
+	BaseFiles []string `json:"baseFiles"`
 }
 
 // moveToTrash moves a path into the user's Trash (replaced in tests).
 var moveToTrash = platform.MoveToTrash
 
-// SetSelection replaces an item's Selection and moves the deselected local
-// parts to the Trash: kept in a partially selected folder, they would join the
-// Selection again. The cloud is never touched: the new filters exclude the
-// deselected paths before the next run, so their local removal is not synced.
+// editedSelection applies an edit from base to requested to the stored
+// Selection: entries that joined it since (local additions, merges) were
+// never shown to the user and stay.
+func editedSelection(requested, stored, base []string) []string {
+	return selection.Merge(requested, selection.Uncovered(stored, base))
+}
+
+// SetSelection applies the user's edit of an item's Selection (from base to
+// the requested one; entries that joined it meanwhile stay) and moves the
+// deselected local parts to the Trash: kept in a partially selected folder,
+// they would join the Selection again. The cloud is never touched: the new
+// filters exclude the deselected paths before the next run, so their local
+// removal is not synced.
 func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, error) {
 	it, err := e.Get(p.ID)
 	if err != nil {
 		return DTO{}, err
 	}
-	next, err := selectionFromParams(p.Kind, p.Files)
+	requested, err := selectionFromParams(p.Kind, p.Files)
+	if err != nil {
+		return DTO{}, err
+	}
+	base, err := selectionFromParams(p.BaseKind, p.BaseFiles)
 	if err != nil {
 		return DTO{}, err
 	}
 	old := selectionOf(it)
+	next := editedSelection(requested, old, base)
 	if slices.Equal(old, next) {
 		e.mu.Lock()
 		defer e.mu.Unlock()
@@ -469,6 +544,8 @@ func (e *Engine) SetSelection(ctx context.Context, p SelectionParams) (DTO, erro
 	e.mu.Lock()
 	fresh, err := e.Get(it.ID)
 	if err == nil {
+		// Entries may have joined while the run stopped.
+		next = editedSelection(requested, selectionOf(fresh), base)
 		applySelection(&fresh, next)
 		e.requestResyncLocked(&fresh)
 		if err = e.st.UpdateOfflineItem(fresh); err == nil {

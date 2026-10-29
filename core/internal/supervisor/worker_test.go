@@ -59,6 +59,35 @@ func TestWorkerProtocolAndGracefulStop(t *testing.T) {
 	}
 }
 
+func TestWorkerPing(t *testing.T) {
+	fakeWorker(t, `read job
+while read l; do
+  case "$l" in
+    *stop*) echo '{"type":"result","status":"stopped"}'; exit 0;;
+    *ping*) echo '{"type":"pong"}';;
+  esac
+done
+`)
+	w, err := Spawn(Job{Type: JobMount, ID: "m"}, Secrets{}, Handlers{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Ping(10 * time.Second); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	w.Stop(10 * time.Second)
+
+	fakeWorker(t, cooperative)
+	w, err = Spawn(Job{Type: JobMount, ID: "m"}, Secrets{ConfigPass: "s3cret"}, Handlers{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Ping(300 * time.Millisecond); err == nil {
+		t.Fatal("a worker without pong answered the ping")
+	}
+	w.Stop(10 * time.Second)
+}
+
 func TestWorkerKilledAfterGrace(t *testing.T) {
 	fakeWorker(t, "read job\ntrap '' INT TERM\nwhile true; do sleep 1; done\n")
 	w, err := Spawn(Job{Type: JobBisync}, Secrets{}, Handlers{})

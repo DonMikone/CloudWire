@@ -93,7 +93,7 @@ struct SharesView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 6) {
-                            if let notice { ShareNotice(message: notice).padding(.bottom, 4) }
+                            if let notice { InlineNotice(message: notice).padding(.bottom, 4) }
                             if isLinkRegistry {
                                 Text("Links created in CloudWire").font(.callout).foregroundStyle(.secondary)
                             }
@@ -124,7 +124,7 @@ struct SharesView: View {
                 model.perform {
                     let result = try await model.client.deleteShare(connectionId: connectionId, id: share.id)
                     shares.removeAll { $0.id == share.id }
-                    if result.remoteStillActive { notice = ShareNotice.stillActive }
+                    if result.remoteStillActive { notice = InlineNotice.stillActive }
                 }
             }
         } message: { _ in

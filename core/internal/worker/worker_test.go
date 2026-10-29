@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,4 +106,69 @@ func TestBisyncWaitsForRenameBookkeeping(t *testing.T) {
 	if !ok || s.Local["a.txt"].Ino == 0 || s.Provider != identity.ProviderNone {
 		t.Fatalf("snapshot %+v", s)
 	}
+}
+
+func TestServeMountAnswersPingWhileVFSBlocks(t *testing.T) {
+	release := make(chan struct{})
+	forgot := make(chan string, 1)
+	old := vfsCall
+	vfsCall = func(method string, in map[string]any) (json.RawMessage, error) {
+		switch method {
+		case "vfs/stats":
+			<-release
+			return json.RawMessage(`{"ok":1}`), nil
+		case "vfs/forget":
+			forgot <- in["dir"].(string)
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { vfsCall = old })
+
+	cmds := make(chan sv.Command, 8)
+	r, w := io.Pipe()
+	msgs := make(chan sv.Msg, 64)
+	go func() {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			var m sv.Msg
+			if json.Unmarshal(sc.Bytes(), &m) == nil {
+				msgs <- m
+			}
+		}
+		close(msgs)
+	}()
+	var unmounted atomic.Bool
+	code := make(chan int, 1)
+	go func() {
+		code <- serveMount("/x", cmds, &emitter{w: w}, func() error { unmounted.Store(true); return nil }, func() bool { return true })
+	}()
+
+	cmds <- sv.Command{Cmd: "stats"}
+	cmds <- sv.Command{Cmd: "forget", Dir: "a"}
+	cmds <- sv.Command{Cmd: "ping"}
+	next(t, msgs, "pong")
+	if d := <-forgot; d != "a" {
+		t.Fatalf("forget dir %q", d)
+	}
+
+	cmds <- sv.Command{Cmd: "stop"}
+	select {
+	case c := <-code:
+		if c != 0 {
+			t.Fatalf("exit code %d", c)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("stop blocked behind a VFS call")
+	}
+	if !unmounted.Load() {
+		t.Fatal("unmount not called")
+	}
+	if m := next(t, msgs, "result"); m.Status != sv.StatusStopped {
+		t.Fatalf("result %+v", m)
+	}
+	close(release)
+	if m := next(t, msgs, "stats"); string(m.VFS) != `{"ok":1}` {
+		t.Fatalf("stats %+v", m)
+	}
+	_ = w.Close()
 }

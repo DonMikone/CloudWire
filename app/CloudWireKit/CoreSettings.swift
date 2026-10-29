@@ -14,6 +14,8 @@ public struct CoreSettings: Decodable, Sendable, Hashable {
     public var pauseRules: PauseRules
     public var bandwidth: Bandwidth
     public var defaultCacheMaxGB: Int
+    /// Free Space Reserve: percent of a volume that should stay free after an Offline Item downloads.
+    public var freeSpaceReservePercent: Int
     public var defaultMountType: MountType
     public var defaultExcludes: [String]
     public var notifications: Notifications
@@ -46,6 +48,7 @@ public struct CoreSettings: Decodable, Sendable, Hashable {
         pauseRules = c.optional("pauseRules") ?? PauseRules.defaults
         bandwidth = c.optional("bandwidth") ?? Bandwidth.defaults
         defaultCacheMaxGB = c.int("defaultCacheMaxGB", 20)
+        freeSpaceReservePercent = c.int("freeSpaceReservePercent", 10)
         defaultMountType = c.value("defaultMountType", .nfsmount)
         defaultExcludes = c.value("defaultExcludes", CoreSettings.defaultExcludes)
         notifications = c.optional("notifications") ?? Notifications.defaults

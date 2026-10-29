@@ -36,6 +36,8 @@ type Worker struct {
 	result   *Msg
 	stats    chan Msg
 	statsMu  sync.Mutex // one stats request at a time
+	pong     chan struct{}
+	pingMu   sync.Mutex // one ping at a time
 	stderr   *tailBuffer
 }
 
@@ -63,7 +65,7 @@ func Spawn(job Job, secrets Secrets, h Handlers) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &Worker{Job: job, cmd: cmd, stdin: stdin, done: make(chan struct{}), stats: make(chan Msg, 1), stderr: newTail(8 << 10)}
+	w := &Worker{Job: job, cmd: cmd, stdin: stdin, done: make(chan struct{}), stats: make(chan Msg, 1), pong: make(chan struct{}, 1), stderr: newTail(8 << 10)}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -106,6 +108,11 @@ func (w *Worker) readStdout(r io.Reader, h Handlers) {
 		case "stats":
 			select {
 			case w.stats <- m:
+			default:
+			}
+		case "pong":
+			select {
+			case w.pong <- struct{}{}:
 			default:
 			}
 		case "result":
@@ -191,6 +198,30 @@ func (w *Worker) Stats(timeout time.Duration) (Msg, error) {
 		return Msg{}, errors.New("worker exited")
 	case <-t.C:
 		return Msg{}, errors.New("worker did not answer in time")
+	}
+}
+
+// Ping asks the worker for a sign of life and waits up to timeout. It never
+// touches the cloud, so a slow connection does not look like a hung worker.
+func (w *Worker) Ping(timeout time.Duration) error {
+	w.pingMu.Lock()
+	defer w.pingMu.Unlock()
+	select {
+	case <-w.pong: // drop a stale reply
+	default:
+	}
+	if err := w.Send(Command{Cmd: "ping"}); err != nil {
+		return err
+	}
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-w.pong:
+		return nil
+	case <-w.done:
+		return errors.New("worker exited")
+	case <-t.C:
+		return errors.New("worker did not answer in time")
 	}
 }
 

@@ -57,7 +57,6 @@ enum ErrorText {
         case "mount.failed": return String(localized: "The drive could not be mounted")
         case "offline.notFound": return String(localized: "Offline Item not found")
         case "offline.overlap": return String(localized: "This overlaps an existing Offline Item")
-        case "offline.insufficientSpace": return String(localized: "Not enough free space")
         case "offline.storageNotEmpty": return String(localized: "The storage location is not empty")
         case "offline.locationMissing": return String(localized: "The storage location is missing")
         case "offline.vaultLocked": return String(localized: "The Vault is locked")

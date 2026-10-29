@@ -158,3 +158,16 @@ func TestLocalAdditionsAndMissingLocal(t *testing.T) {
 		t.Fatalf("missing %q", got)
 	}
 }
+
+func TestLocalAdditionsIgnoreSpelling(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, "T/U\u0308bung/u", "T/Neu/n")
+	it := store.OfflineItem{Kind: "files", Files: []string{"T/\u00dcbung"}, StoragePath: dir}
+	got, err := localAdditions(it, ConflictMarker("Konflikt"), nil)
+	if err != nil || !slices.Equal(got, []string{"T/Neu"}) {
+		t.Fatalf("additions %q, %v", got, err)
+	}
+	if got := missingLocal(dir, it.Files); got != nil {
+		t.Fatalf("missing %q", got)
+	}
+}

@@ -72,12 +72,12 @@ func TestCPUTicksMonotonic(t *testing.T) {
 	}
 }
 
-func TestFreeBytes(t *testing.T) {
-	n, err := FreeBytes(t.TempDir())
-	if err != nil || n == 0 {
-		t.Fatalf("FreeBytes = %d, %v", n, err)
+func TestDiskSpace(t *testing.T) {
+	free, total, err := DiskSpace(t.TempDir())
+	if err != nil || free == 0 || free > total {
+		t.Fatalf("DiskSpace = %d, %d, %v", free, total, err)
 	}
-	if _, err := FreeBytes("/definitely/missing/path"); err == nil {
+	if _, _, err := DiskSpace("/definitely/missing/path"); err == nil {
 		t.Fatal("missing path must fail")
 	}
 }

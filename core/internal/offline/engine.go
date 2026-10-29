@@ -1,6 +1,7 @@
 package offline
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
+	"github.com/DonMikone/CloudWire/core/internal/identity"
 	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/notify"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
@@ -200,6 +202,10 @@ type Engine struct {
 	done        chan struct{}
 	closed      bool
 	started     bool
+
+	// preflightCancel cancels the running size measurement (Preflight).
+	preflightMu     sync.Mutex
+	preflightCancel context.CancelFunc
 }
 
 // New creates the engine. Start launches its loop.
@@ -676,8 +682,18 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 		if err != nil {
 			return err
 		}
+		f := e.paths.FiltersFile(it.ID)
+		before, _ := os.ReadFile(f)
 		if err := WriteFilters(e.paths, it); err != nil {
 			return err
+		}
+		if !it.NeedsResync && len(before) > 0 && string(before) != filtersContent(it) {
+			// Only an update changes the rules of an unchanged Selection (e.g. the
+			// spelling-tolerant rules). They match the same paths in more spellings,
+			// so bisync's hash is renewed instead of demanding a resync.
+			if err := identity.WriteFiltersHash(f); err != nil {
+				return err
+			}
 		}
 		// The Storage Location's inode finds it again after a rename or move.
 		var st unix.Stat_t

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 )
@@ -125,6 +127,25 @@ func globEscape(s string) string {
 	return b.String()
 }
 
+// filterGlob escapes a Selection entry for an anchored filter rule that
+// matches it in any Unicode normalization: macOS names are often NFD, cloud
+// names NFC, and rclone compares rules byte by byte. Each character with a
+// different decomposed form becomes the alternative {NFC,NFD}; braces
+// without "/" keep rclone's directory rules (a {{regex}} would make it list
+// every directory).
+func filterGlob(p string) string {
+	var b strings.Builder
+	for _, r := range norm.NFC.String(p) {
+		c := string(r)
+		if d := norm.NFD.String(c); d != c {
+			b.WriteString("{" + globEscape(c) + "," + globEscape(d) + "}")
+		} else {
+			b.WriteString(globEscape(c))
+		}
+	}
+	return b.String()
+}
+
 // FilterLines returns the bisync filters file content of an item.
 func FilterLines(it store.OfflineItem) []string {
 	var lines []string
@@ -139,16 +160,21 @@ func FilterLines(it store.OfflineItem) []string {
 		for _, f := range it.Files {
 			// rclone adds the parent folders as directory includes, so they
 			// are traversed while their own files stay excluded.
-			lines = append(lines, "+ /"+globEscape(f), "+ /"+globEscape(f)+"/**")
+			lines = append(lines, "+ /"+filterGlob(f), "+ /"+filterGlob(f)+"/**")
 		}
 		lines = append(lines, "- **")
 	}
 	return lines
 }
 
+// filtersContent is the filters file content of an item.
+func filtersContent(it store.OfflineItem) string {
+	return strings.Join(FilterLines(it), "\n") + "\n"
+}
+
 // WriteFilters writes the filters file of an item.
 func WriteFilters(p paths.Paths, it store.OfflineItem) error {
-	content := strings.Join(FilterLines(it), "\n") + "\n"
+	content := filtersContent(it)
 	f := p.FiltersFile(it.ID)
 	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
 		return err

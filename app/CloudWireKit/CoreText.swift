@@ -292,6 +292,12 @@ public struct CoreText: Sendable, Hashable {
                 localized: "Not enough free space: \(neededBytes) needed, \(freeBytes) available",
                 bundle: a.bundle)
         },
+        "offline.lowSpace": { a in
+            guard let free = a.bytes("freeAfterBytes"), let reserve = a.percent("reservePercent") else { return nil }
+            return String(
+                localized: "Only \(free) would stay free on this volume, less than the free space reserve of \(reserve)",
+                bundle: a.bundle)
+        },
         "offline.moveFailed": { a in String(localized: "Moving the files failed", bundle: a.bundle) },
         "offline.trashFailed": { a in String(localized: "Moving the local copy to the Trash failed", bundle: a.bundle) },
         "offline.vaultFolder": { a in

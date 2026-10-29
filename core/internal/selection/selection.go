@@ -1,6 +1,7 @@
 // Package selection holds the vocabulary of an Offline Item's Selection:
 // sorted paths relative to the item's root (with "/" separators), none of
-// which lies below another. [""] is the whole root.
+// which lies below another. [""] is the whole root. Entries are stored in
+// NFC; comparisons treat NFC and NFD spellings (macOS names) alike.
 package selection
 
 import (
@@ -9,17 +10,21 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/DonMikone/CloudWire/core/internal/api"
 )
 
-// Within reports whether path a equals b or lies below it.
+// Within reports whether path a equals b or lies below it, in any Unicode
+// normalization.
 func Within(a, b string) bool {
-	a, b = strings.Trim(a, "/"), strings.Trim(b, "/")
+	a, b = norm.NFC.String(strings.Trim(a, "/")), norm.NFC.String(strings.Trim(b, "/"))
 	return b == "" || a == b || strings.HasPrefix(a, b+"/")
 }
 
 // Rebase maps p from below from to below to; false if p is neither from nor
-// below it.
+// below it. It compares byte by byte: it rewrites bisync listings, which must
+// keep each side's spelling.
 func Rebase(p, from, to string) (string, bool) {
 	if p == from {
 		return to, true
@@ -47,7 +52,7 @@ func Join(dir, name string) string {
 func Normalize(entries []string) ([]string, error) {
 	trimmed := make([]string, 0, len(entries))
 	for _, e := range entries {
-		t := strings.Trim(e, "/")
+		t := norm.NFC.String(strings.Trim(e, "/"))
 		if t == "" {
 			return nil, api.Invalid("invalid path %q", e)
 		}
@@ -97,8 +102,9 @@ func Covers(entries []string, rel string) bool {
 
 // HasBelow reports whether some entry lies strictly below rel.
 func HasBelow(entries []string, rel string) bool {
+	rel = norm.NFC.String(rel)
 	for _, e := range entries {
-		if (rel == "" && e != "") || strings.HasPrefix(e, rel+"/") {
+		if (rel == "" && e != "") || strings.HasPrefix(norm.NFC.String(e), rel+"/") {
 			return true
 		}
 	}

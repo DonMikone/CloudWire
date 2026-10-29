@@ -217,25 +217,35 @@ func (e *Engine) adoptableLocked(it store.OfflineItem, rel string) bool {
 	return true
 }
 
+// nextcloudDAV returns a WebDAV client and root path for a Nextcloud or
+// ownCloud Connection (ok false for any other provider).
+func (e *Engine) nextcloudDAV(conn store.Connection) (c *nextcloud.Client, root string, ok bool) {
+	if conn.Provider != "webdav" {
+		return nil, "", false
+	}
+	cfg, err := e.Conns.Config(conn)
+	if err != nil || !nextcloudVendor(cfg) {
+		return nil, "", false
+	}
+	base, root, err := nextcloud.DAVLocation(cfg["url"])
+	if err != nil {
+		return nil, "", false
+	}
+	pass, _ := obscure.Reveal(cfg["pass"])
+	return &nextcloud.Client{Base: base, User: cfg["user"], Pass: pass, DAVURL: cfg["url"]}, root, true
+}
+
 // startRemote sets up remote change detection for an item.
 func (e *Engine) startRemote(it store.OfflineItem) {
 	conn, err := e.Conns.Get(it.ConnectionID)
 	if err != nil {
 		return
 	}
-	cfg, err := e.Conns.Config(conn)
-	if err != nil {
-		return
-	}
 	rw := &remoteWatch{kind: remoteGeneric}
-	if conn.Provider == "webdav" && nextcloudVendor(cfg) {
-		base, root, err := nextcloud.DAVLocation(cfg["url"])
-		if err == nil {
-			pass, _ := obscure.Reveal(cfg["pass"])
-			rw.kind = remoteETag
-			rw.client = &nextcloud.Client{Base: base, User: cfg["user"], Pass: pass, DAVURL: cfg["url"]}
-			rw.path = nextcloud.JoinPath(root, it.RemotePath)
-		}
+	if c, root, ok := e.nextcloudDAV(conn); ok {
+		rw.kind = remoteETag
+		rw.client = c
+		rw.path = nextcloud.JoinPath(root, it.RemotePath)
 	} else if nw := e.changeNotify(conn, it); nw != nil {
 		rw = nw
 	}

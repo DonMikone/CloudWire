@@ -114,6 +114,7 @@ var templates = map[string]string{
 
 	"offline.notFound":             "Offline Item {id} not found",
 	"offline.insufficientSpace":    "Not enough free space: {neededBytes} needed, {freeBytes} available",
+	"offline.lowSpace":             "Only {freeAfterBytes} would stay free on this volume, less than the free space reserve of {reservePercent}%",
 	"offline.moveFailed":           "Moving the files failed",
 	"offline.trashFailed":          "Moving the local copy to the Trash failed",
 	"offline.vaultFolder":          `"{folder}" holds encrypted Vault data. Unlock the Vault and make it available offline under Vaults.`,

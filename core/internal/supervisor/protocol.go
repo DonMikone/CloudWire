@@ -126,7 +126,7 @@ type Start struct {
 
 // Command is a later stdin line.
 type Command struct {
-	Cmd  string `json:"cmd"`            // stop | stats | bwlimit | forget | continue
+	Cmd  string `json:"cmd"`            // stop | stats | ping | bwlimit | forget | continue
 	Rate string `json:"rate,omitempty"` // bwlimit
 	Dir  string `json:"dir,omitempty"`  // forget
 	// Bisync and Identity replace the job's sync/bisync params and item
@@ -137,7 +137,7 @@ type Command struct {
 
 // Msg is one stdout line of a worker.
 type Msg struct {
-	Type       string          `json:"type"` // ready | mounted | progress | stats | renames | result
+	Type       string          `json:"type"` // ready | mounted | progress | stats | pong | renames | result
 	MountPoint string          `json:"mountPoint,omitempty"`
 	Bytes      int64           `json:"bytes,omitempty"`
 	TotalBytes int64           `json:"totalBytes,omitempty"`

@@ -193,6 +193,20 @@ func TestSettingsDefaultsAndMergePatch(t *testing.T) {
 	}
 }
 
+func TestFreeSpaceReserveRange(t *testing.T) {
+	s := openTest(t)
+	st, err := s.Settings()
+	if err != nil || st.FreeSpaceReservePercent != 10 {
+		t.Fatalf("default reserve %d, %v", st.FreeSpaceReservePercent, err)
+	}
+	for p, ok := range map[int]bool{-1: false, 0: true, 50: true, 51: false} {
+		st.FreeSpaceReservePercent = p
+		if err := st.Validate(); (err == nil) != ok {
+			t.Errorf("reserve %d: %v", p, err)
+		}
+	}
+}
+
 func TestActivityFilters(t *testing.T) {
 	s := openTest(t)
 	mustAppend := func(level, cat, text string) {

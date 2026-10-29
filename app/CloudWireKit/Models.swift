@@ -514,18 +514,30 @@ public struct OfflineProgressEvent: Decodable, Sendable, Hashable {
 public struct PreflightResult: Decodable, Sendable, Hashable {
     public var remoteBytes: Int64
     public var freeBytes: Int64
+    /// Capacity of the volume.
+    public var totalBytes: Int64
     public var storageNonEmpty: Bool
     public var storagePath: String
-
-    /// Mirrors the Core's rule: free space must be at least 1.1 × the cloud size.
-    public var hasEnoughSpace: Bool { Double(freeBytes) >= 1.1 * Double(remoteBytes) }
+    /// The Selection fits into the free space (judged by the Core).
+    public var fits: Bool
+    /// The Selection would cut into the Free Space Reserve.
+    public var lowSpace: Bool
+    /// Why it does not fit or cuts into the reserve (nil when neither).
+    public var space: CoreText?
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         remoteBytes = c.int64("remoteBytes")
         freeBytes = c.int64("freeBytes")
+        totalBytes = c.int64("totalBytes")
         storageNonEmpty = c.bool("storageNonEmpty")
         storagePath = c.string("storagePath")
+        fits = c.bool("fits")
+        lowSpace = c.bool("lowSpace")
+        if let raw = c.optional("space", as: JSONValue.self), !raw.isNull {
+            space = CoreText(code: raw["code"]?.stringValue, params: raw["params"]?.stringMap ?? [:],
+                             message: raw["message"]?.stringValue ?? "")
+        }
     }
 }
 

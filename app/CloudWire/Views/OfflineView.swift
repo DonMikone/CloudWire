@@ -316,12 +316,19 @@ struct AddOfflineSheet: View {
                             }
                         }
                         if checking {
-                            ProgressView().controlSize(.small)
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Calculating cloud size…").font(.caption).foregroundStyle(.secondary)
+                            }
                         } else if let preflight {
                             Text("Cloud size \(Format.bytes(preflight.remoteBytes)) · free on disk \(Format.bytes(preflight.freeBytes))")
                                 .font(.caption).foregroundStyle(.secondary)
-                            if !preflight.hasEnoughSpace {
-                                InlineError(message: String(localized: "Not enough free space: about \(Format.bytes(Int64(Double(preflight.remoteBytes) * 1.1))) needed, \(Format.bytes(preflight.freeBytes)) free. Use “Change…” to choose a storage location on another volume."))
+                            if let space = preflight.space {
+                                if preflight.fits {
+                                    InlineNotice(message: space.localized())
+                                } else {
+                                    InlineError(message: space.localized() + " " + String(localized: "Use “Change…” to choose a storage location on another volume."))
+                                }
                             }
                         }
                     }
@@ -383,9 +390,7 @@ struct AddOfflineSheet: View {
     }
 
     private var canCreate: Bool {
-        guard !connectionId.isEmpty, selection.target != nil, !creating, !checking else { return false }
-        if let preflight, !preflight.hasEnoughSpace { return false }
-        return preflight != nil
+        !connectionId.isEmpty && selection.target != nil && !creating && preflight?.fits != false
     }
 
     private func runPreflight() async {
@@ -395,9 +400,11 @@ struct AddOfflineSheet: View {
         }
         try? await Task.sleep(for: .milliseconds(250))
         guard !Task.isCancelled else { return }
+        // A verdict for another Selection must neither block nor warn.
+        preflight = nil
         checking = true
         error = nil
-        defer { checking = false }
+        defer { if !Task.isCancelled { checking = false } }
         do {
             let result = try await model.client.offlinePreflight(
                 connectionId: connectionId, kind: target.kind, remotePath: target.remotePath,
@@ -406,6 +413,8 @@ struct AddOfflineSheet: View {
             preflight = result
         } catch is CancellationError {
         } catch {
+            // A superseded measurement is cancelled by the Core.
+            guard !Task.isCancelled else { return }
             preflight = nil
             let alert = ErrorText.alert(for: error)
             self.error = "\(alert.title): \(alert.message)"
@@ -509,12 +518,19 @@ struct EditOfflineSelectionSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     if checking {
-                        ProgressView().controlSize(.small)
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Calculating cloud size…").font(.caption).foregroundStyle(.secondary)
+                        }
                     } else if let preflight {
                         Text("Additional cloud size \(Format.bytes(preflight.remoteBytes)) · free on disk \(Format.bytes(preflight.freeBytes))")
                             .font(.caption).foregroundStyle(.secondary)
-                        if !preflight.hasEnoughSpace {
-                            InlineError(message: String(localized: "Not enough free space: \(Format.bytes(Int64(Double(preflight.remoteBytes) * 1.1))) needed, \(Format.bytes(preflight.freeBytes)) available"))
+                        if let space = preflight.space {
+                            if preflight.fits {
+                                InlineNotice(message: space.localized())
+                            } else {
+                                InlineError(message: space.localized())
+                            }
                         }
                     }
                 }
@@ -564,9 +580,7 @@ struct EditOfflineSelectionSheet: View {
     }
 
     private var canSave: Bool {
-        guard !selection.isEmpty, selection != original, !saving, !checking else { return false }
-        if added.isEmpty { return true }
-        return preflight?.hasEnoughSpace == true
+        !selection.isEmpty && selection != original && !saving && (added.isEmpty || preflight?.fits != false)
     }
 
     private func runPreflight() async {
@@ -576,9 +590,11 @@ struct EditOfflineSelectionSheet: View {
         }
         try? await Task.sleep(for: .milliseconds(250))
         guard !Task.isCancelled else { return }
+        // A verdict for another Selection must neither block nor warn.
+        preflight = nil
         checking = true
         error = nil
-        defer { checking = false }
+        defer { if !Task.isCancelled { checking = false } }
         do {
             let result = try await model.client.offlinePreflight(
                 connectionId: item.connectionId, kind: target.kind, remotePath: target.remotePath,
@@ -587,6 +603,8 @@ struct EditOfflineSelectionSheet: View {
             preflight = result
         } catch is CancellationError {
         } catch {
+            // A superseded measurement is cancelled by the Core.
+            guard !Task.isCancelled else { return }
             preflight = nil
             let alert = ErrorText.alert(for: error)
             self.error = "\(alert.title): \(alert.message)"
@@ -604,13 +622,12 @@ struct EditOfflineSelectionSheet: View {
     /// Deselected local parts go to the Trash: kept in a partially selected
     /// folder, they would join the Selection again.
     private func apply() {
-        guard let target = selection.target else { return }
+        guard let target = selection.target, let base = original.target else { return }
         saving = true
         error = nil
         Task {
             do {
-                let updated = try await model.client.setOfflineSelection(
-                    id: item.id, kind: target.kind, files: target.files)
+                let updated = try await model.client.setOfflineSelection(id: item.id, target: target, base: base)
                 model.updated(updated)
                 dismiss()
             } catch {

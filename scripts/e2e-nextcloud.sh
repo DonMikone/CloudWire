@@ -110,6 +110,7 @@ CID="$(rpc connections.nextcloudManual "{\"serverURL\":\"$NC_URL\",\"user\":\"ad
 rpc connections.test "{\"id\":\"$CID\"}" | jq -e '.ok == true' >/dev/null && ok "connection test" || fail "connection test"
 rpc connections.browse "{\"connectionId\":\"$CID\",\"path\":\"Music\"}" | jq -e '.[0].name == "Loops" and .[0].isDir and (map(.name) | index("Mix.wav"))' >/dev/null \
   && ok "browse lists folders first" || fail "browse"
+rpc offline.preflight "{\"connectionId\":\"$CID\",\"kind\":\"files\",\"remotePath\":\"\",\"files\":[\"Tree/123\",\"Music/Mix.wav\"]}" | jq -e '.remoteBytes == 15 and .fits and .totalBytes > 0' >/dev/null && ok "preflight measures Nextcloud sizes" || fail "preflight"
 if rpc connections.nextcloudManual "{\"serverURL\":\"$NC_URL\",\"user\":\"admin\",\"appPassword\":\"wrong\",\"name\":\"Bad\"}" >/dev/null 2>&1; then
   fail "wrong app password accepted"
 else ok "wrong app password rejected"; fi
@@ -193,7 +194,7 @@ TP="$TROOT/Tree/123"
 tree_synced() { [ -f "$TP/B/b.txt" ] && [ -f "$TP/C/c.txt" ]; }
 wait_for 60 "checked folders synced at their cloud path" tree_synced
 [ ! -e "$TP/A" ] && [ ! -e "$TP/readme.txt" ] && ok "unchecked folder and parent files stay in the cloud" || fail "unselected items synced"
-rpc offline.setSelection "{\"id\":\"$TID\",\"kind\":\"files\",\"files\":[\"Tree/123/B\"]}" | jq -e '.files == ["Tree/123/B"]' >/dev/null \
+rpc offline.setSelection "{\"id\":\"$TID\",\"kind\":\"files\",\"files\":[\"Tree/123/B\"],\"baseKind\":\"files\",\"baseFiles\":[\"Tree/123/B\",\"Tree/123/C\"]}" | jq -e '.files == ["Tree/123/B"]' >/dev/null \
   && ok "selection narrowed" || fail "setSelection"
 resynced() { rpc offline.list | jq -e ".[] | select(.id==\"$TID\") | .state == \"idle\" and .needsResync == false" >/dev/null; }
 wait_for 60 "resync after the selection change" resynced
@@ -206,11 +207,13 @@ mkdir -p "$TP/New" && echo n > "$TP/New/n.txt" && echo m > "$TP/New/m.txt"
 adopted() { exists_remote Tree/123/New/n.txt && [ "$(tree_files)" = '["Tree/123/B","Tree/123/New"]' ]; }
 wait_for 90 "local folder in a partial folder adopted and uploaded" adopted
 wait_for 60 "resync after adopting" resynced
+# Saved from a sheet opened before New joined: New stays in the Selection.
+rpc offline.setSelection "{\"id\":\"$TID\",\"kind\":\"files\",\"files\":[\"Tree/123/B\"],\"baseKind\":\"files\",\"baseFiles\":[\"Tree/123/B\"]}" | jq -e '.files == ["Tree/123/B","Tree/123/New"]' >/dev/null && [ -f "$TP/New/n.txt" ] && ok "a stale Selection edit keeps entries added meanwhile" || fail "stale edit dropped New"
 # A local rename of a checked folder is one server-side move in the cloud (same file id); the
 # Selection follows without a resync and nothing is transferred.
 fileid() {
   dav -X PROPFIND -H 'Depth: 0' --data '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><oc:fileid/></d:prop></d:propfind>' \
-    "$(dav_url "$1")" | sed -n 's:.*<oc:fileid>\([0-9]*\)</oc:fileid>.*:\1:p'
+    "$(dav_url "$1")" | sed -n 's|.*<oc:fileid>\([0-9]*\)</oc:fileid>.*|\1|p'
 }
 FID_B="$(fileid Tree/123/B)"
 [ -n "$FID_B" ] || fail "no file id for Tree/123/B"
@@ -233,6 +236,17 @@ partial_renamed() { exists_remote Tree/124/A/a.txt && ! exists_remote Tree/123 &
 wait_for 90 "partially selected folder renamed with its cloud-only content" partial_renamed
 wait_for 60 "synced after the folder rename" resynced
 [ ! -e "$TP/A" ] && [ ! -e "$TP/readme.txt" ] && [ ! -e "$TP/C" ] && ok "cloud-only parts of partial folders stay in the cloud" || fail "cloud-only parts downloaded"
+# A folder created by Finder is named in NFD; the cloud stores NFC. It joins the Selection and stays after the next sync.
+UML="$TP/$(printf 'U\xcc\x88bung')"; mkdir "$UML" && echo u > "$UML/u.txt"
+umlaut_adopted() { exists_remote "Tree/124/%C3%9Cbung/u.txt" && tree_files | grep -qF "\"Tree/124/$(printf '\xc3\x9c')bung\""; }
+wait_for 90 "umlaut folder adopted and uploaded" umlaut_adopted
+wait_for 60 "resync after the umlaut folder" resynced
+last_run() { rpc offline.runs "{\"itemId\":\"$TID\",\"limit\":1}" | jq -r '.[0].id'; }
+LAST="$(last_run)"
+rpc offline.syncNow "{\"id\":\"$TID\"}" >/dev/null
+next_run() { [ "$(last_run)" != "$LAST" ] && resynced; }
+wait_for 60 "normal run after the resync" next_run
+[ -f "$UML/u.txt" ] && exists_remote "Tree/124/%C3%9Cbung/u.txt" && ok "umlaut folder created locally stays after the next sync" || fail "umlaut folder deleted"
 
 log "Shares"
 rpc shares.capabilities "{\"connectionId\":\"$CID\"}" | jq -e '.publicLink and .internalLink and .userShare and .emailShare and .manage' >/dev/null && ok "capabilities" || fail "capabilities"

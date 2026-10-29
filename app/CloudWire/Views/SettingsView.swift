@@ -212,6 +212,13 @@ private struct SyncSettings: View {
                 BandwidthSetting(title: "Upload", side: \.uploadMiBps, fallback: 5)
                 BandwidthSetting(title: "Download", side: \.downloadMiBps, fallback: 20)
             }
+            Section("Disk Space") {
+                NumberSetting(title: "Free space reserve",
+                              value: model.settingBinding(\.freeSpaceReservePercent, ["freeSpaceReservePercent"]),
+                              range: 0...50, unit: "%", step: 5)
+                Text("Warns before making items available offline would leave less free space on the volume. 0 % turns the warning off.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Default Excludes") {
                 TextEditor(text: $excludes)
                     .font(.body.monospaced())

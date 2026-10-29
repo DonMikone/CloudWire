@@ -31,6 +31,25 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestNormalizationInsensitive(t *testing.T) {
+	const nfdU, nfcU = "U\u0308", "\u00dc"
+	if got, err := Normalize([]string{"A/" + nfdU, "A/" + nfcU}); err != nil || !slices.Equal(got, []string{"A/" + nfcU}) {
+		t.Fatalf("normalize %q, %v", got, err)
+	}
+	if !Covers([]string{"A/" + nfcU}, "A/"+nfdU+"/x") {
+		t.Error("an NFC entry must cover an NFD path")
+	}
+	if !HasBelow([]string{"A/" + nfcU + "/x"}, "A/"+nfdU) {
+		t.Error("an NFC entry must lie below an NFD folder")
+	}
+	if !Relevant([]string{"\u00c4pfel/B"}, "A\u0308pfel") {
+		t.Error("an NFD parent of an NFC entry must be relevant")
+	}
+	if got := FirstUnselected([]string{"A/" + nfcU}, "A/"+nfdU+"/x"); got != "" {
+		t.Errorf("first unselected %q", got)
+	}
+}
+
 func TestRelevantAndCovers(t *testing.T) {
 	entries := []string{"Meine Daten/123/B", "Meine Daten/123/C"}
 	for rel, want := range map[string]bool{

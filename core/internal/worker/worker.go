@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -204,10 +205,31 @@ func forceUnmount(mountPoint string) error {
 	return mounts.ForceUnmount(mountPoint)
 }
 
+// vfsCall runs a VFS rc call of a Mount (replaced in tests).
+var vfsCall = func(method string, in map[string]any) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := rcl.CallInto(method, in, &out)
+	return out, err
+}
+
 // serveMount answers commands until stop/EOF or until the volume is ejected.
+// rclone holds a directory lock during cloud listings, so VFS calls never run
+// on this loop: stop, eject detection and ping must stay responsive.
 func serveMount(mountPoint string, cmds <-chan sv.Command, out *emitter, unmount func() error, attached func() bool) int {
 	check := time.NewTicker(5 * time.Second)
 	defer check.Stop()
+	forgets := make(chan string, 64)
+	defer close(forgets)
+	go func() {
+		for dir := range forgets {
+			in := map[string]any{}
+			if dir != "" {
+				in["dir"] = dir
+			}
+			_, _ = vfsCall("vfs/forget", in)
+		}
+	}()
+	var statsBusy atomic.Bool
 	for {
 		select {
 		case c, ok := <-cmds:
@@ -220,18 +242,26 @@ func serveMount(mountPoint string, cmds <-chan sv.Command, out *emitter, unmount
 				return 0
 			}
 			switch c.Cmd {
+			case "ping":
+				out.emit(sv.Msg{Type: "pong"})
 			case "stats":
-				var st json.RawMessage
-				if err := rcl.CallInto("vfs/stats", nil, &st); err != nil {
-					st, _ = json.Marshal(map[string]string{"error": err.Error()})
+				if !statsBusy.CompareAndSwap(false, true) {
+					continue // a stats call is already running
 				}
-				out.emit(sv.Msg{Type: "stats", VFS: st})
+				go func() {
+					defer statsBusy.Store(false)
+					st, err := vfsCall("vfs/stats", nil)
+					if err != nil {
+						st, _ = json.Marshal(map[string]string{"error": err.Error()})
+					}
+					out.emit(sv.Msg{Type: "stats", VFS: st})
+				}()
 			case "forget":
-				in := map[string]any{}
-				if c.Dir != "" {
-					in["dir"] = c.Dir
+				// A dropped hint only delays a listing refresh until it expires.
+				select {
+				case forgets <- c.Dir:
+				default:
 				}
-				_, _ = rcl.Call("vfs/forget", in)
 			}
 		case <-check.C:
 			// Detect an unmount done outside CloudWire (Finder "Eject").

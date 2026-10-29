@@ -1,10 +1,13 @@
 package offline
 
 import (
+	"context"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rclone/rclone/fs/filter"
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
@@ -77,6 +80,40 @@ func TestFilterLines(t *testing.T) {
 	b, _ := os.ReadFile(p.FiltersFile("id1"))
 	if string(b) != strings.Join(want, "\n")+"\n" {
 		t.Fatalf("filters file %q", b)
+	}
+}
+
+func TestFilterLinesMatchAnySpelling(t *testing.T) {
+	it := store.OfflineItem{Kind: "files", Files: []string{"A\u0308pfel/U\u03082"}}
+	want := []string{"+ /{\u00c4,A\u0308}pfel/{\u00dc,U\u0308}2", "+ /{\u00c4,A\u0308}pfel/{\u00dc,U\u0308}2/**", "- **"}
+	got := FilterLines(it)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filters\n got %q\nwant %q", got, want)
+	}
+	f, err := filter.NewFilter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range got {
+		if err := f.AddRule(rule); err != nil {
+			t.Fatalf("rule %q: %v", rule, err)
+		}
+	}
+	for remote, want := range map[string]bool{
+		"\u00c4pfel/\u00dc2/x":   true, // NFC (cloud)
+		"A\u0308pfel/U\u03082/x": true, // NFD (Finder)
+		"\u00c4pfel/U\u03082/x":  true, // mixed
+		"\u00c4pfel/other.txt":   false,
+	} {
+		if got := f.IncludeRemote(remote); got != want {
+			t.Errorf("IncludeRemote(%q) = %v", remote, got)
+		}
+	}
+	dirs := f.IncludeDirectory(context.Background(), nil)
+	for dir, want := range map[string]bool{"A\u0308pfel": true, "\u00c4pfel": true, "Birnen": false} {
+		if got, err := dirs(dir); err != nil || got != want {
+			t.Errorf("IncludeDirectory(%q) = %v, %v", dir, got, err)
+		}
 	}
 }
 
