@@ -2,11 +2,16 @@ package offline
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +20,7 @@ import (
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/cache"
 	"github.com/rclone/rclone/fs/config/obscure"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/selection"
@@ -303,7 +309,8 @@ func (e *Engine) onRemoteChange(id, p string) {
 	e.poke()
 }
 
-// checkETag compares the remote root ETag with the stored one.
+// checkETag compares the remote ETag of the item (for a files item: of its
+// Selection, see selectionETag) with the stored one.
 func (e *Engine) checkETag(it store.OfflineItem) {
 	e.mu.Lock()
 	rt := e.rt[it.ID]
@@ -315,9 +322,12 @@ func (e *Engine) checkETag(it store.OfflineItem) {
 	if rw == nil || rw.client == nil {
 		return
 	}
+	if cur, err := e.st.OfflineItem(it.ID); err == nil {
+		it = cur // the Selection may have changed since the check was scheduled
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	etag, err := rw.client.ETag(ctx, rw.path)
+	etag, err := itemETag(ctx, rw.client, rw.path, it)
 	if err != nil {
 		slog.Debug("offline: etag check", "item", it.ID, "err", err)
 		return
@@ -332,4 +342,60 @@ func (e *Engine) checkETag(it store.OfflineItem) {
 		return
 	}
 	e.onRemoteChange(it.ID, "")
+}
+
+// itemETag returns the value compared with OfflineItem.RemoteETag: the
+// ETag of the item root for a folder item, the Selection digest for a files
+// item.
+func itemETag(ctx context.Context, c *nextcloud.Client, root string, it store.OfflineItem) (string, error) {
+	if it.Kind != "files" {
+		return c.ETag(ctx, root)
+	}
+	return selectionETag(ctx, c, root, it.Files)
+}
+
+// selectionETag stands in for the root ETag of a files item: a digest of the
+// ETags of its Selection entries, read with one PROPFIND Depth 1 per parent
+// folder. Nextcloud changes a folder's ETag whenever something below it
+// changes, so the digest changes when the Selection changes in the cloud,
+// but not when another Offline Item or the Mount writes elsewhere under the
+// same root (the root ETag would). A missing entry or parent is a state of
+// its own. Names match across Unicode normalization (macOS NFD vs cloud
+// NFC). If the server leaves an entry without ETag, the root ETag is used.
+func selectionETag(ctx context.Context, c *nextcloud.Client, root string, files []string) (string, error) {
+	byParent := map[string][]string{}
+	for _, f := range files {
+		f = strings.Trim(f, "/")
+		if f == "" {
+			return c.ETag(ctx, root) // the root itself is selected
+		}
+		byParent[path.Dir(f)] = append(byParent[path.Dir(f)], f)
+	}
+	h := sha256.New()
+	for _, dir := range slices.Sorted(maps.Keys(byParent)) {
+		ocs := root
+		if dir != "." {
+			ocs = nextcloud.JoinPath(root, dir)
+		}
+		list, err := c.ListDir(ctx, ocs)
+		if err != nil && !errors.Is(err, nextcloud.ErrNotFound) {
+			return "", err
+		}
+		etags := map[string]string{}
+		if len(list) > 0 {
+			for _, e := range list[1:] {
+				etags[norm.NFC.String(path.Base(e.Path))] = e.ETag
+			}
+		}
+		entries := byParent[dir]
+		slices.Sort(entries)
+		for _, f := range entries {
+			etag, ok := etags[norm.NFC.String(path.Base(f))]
+			if ok && etag == "" {
+				return c.ETag(ctx, root)
+			}
+			fmt.Fprintf(h, "%s\x00%t\x00%s\n", f, ok, etag)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

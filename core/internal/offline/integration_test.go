@@ -117,6 +117,8 @@ func names(t *testing.T, dir string) []string {
 }
 
 // sync runs bisync in-process with exactly the params the worker would use.
+// The listing cache is on: the local remote reports no folder ETags, so it
+// never reuses a folder, but every scenario runs through the recording path.
 func (pr *pair) sync(force bool) error {
 	pr.t.Helper()
 	if err := WriteFilters(pr.p, pr.item); err != nil {
@@ -128,7 +130,7 @@ func (pr *pair) sync(force bool) error {
 	logMu.Lock()
 	logLines = nil
 	logMu.Unlock()
-	_, err := rcl.Call("sync/bisync", BisyncParams(pr.item, "loc", pr.p, "Konflikt", force))
+	_, err := rcl.Call("sync/bisync", BisyncParams(pr.item, "loc", pr.p, "Konflikt", force, ListingCacheUse))
 	if err == nil {
 		pr.item.NeedsResync = false
 	}

@@ -120,6 +120,7 @@ type running struct {
 	abort     string            // bisync safety abort log line (Mass-Delete Guard)
 	// bisync reported unusable listings: the next run resyncs
 	lostListings bool
+	listingCache string // bisync's listingCache mode of this run ("" = off)
 }
 
 type itemRT struct {
@@ -139,6 +140,9 @@ type itemRT struct {
 	watch          *watcher
 	remote         *remoteWatch
 	lastNotifiedEr bool
+	// fullListing makes the next run list the cloud completely and renew
+	// bisync's listing cache: at Core start and on every safety run.
+	fullListing bool
 	// rootRename is a cloud root rename the next run applies first: the
 	// Storage Location of an item created before 0.3.0 was renamed.
 	rootRename *sv.RootRename
@@ -269,7 +273,7 @@ func (e *Engine) Start() error {
 func (e *Engine) itemRT(id string) *itemRT {
 	rt := e.rt[id]
 	if rt == nil {
-		rt = &itemRT{pendingPaths: map[string]bool{}, duringRun: map[string]bool{}}
+		rt = &itemRT{pendingPaths: map[string]bool{}, duringRun: map[string]bool{}, fullListing: true}
 		e.rt[id] = rt
 	}
 	return rt
@@ -294,6 +298,22 @@ func (e *Engine) remoteInterval(it store.OfflineItem, st store.Settings) int {
 		}
 	}
 	return st.GenericCheckSeconds
+}
+
+// listingCacheLocked picks bisync's listingCache mode for the next run of an
+// item. Only Nextcloud reports the folder ETags the cache relies on. The cloud
+// is listed completely at Core start, on every safety run, after a failed
+// run and when a Mass-Delete Guard stop was confirmed; every other run reuses
+// unchanged folders.
+func (e *Engine) listingCacheLocked(it store.OfflineItem, force bool) string {
+	rt := e.rt[it.ID]
+	if rt == nil || rt.remote == nil || rt.remote.kind != remoteETag {
+		return ""
+	}
+	if rt.fullListing || rt.retryCount > 0 || force || it.NeedsResync {
+		return ListingCacheRefresh
+	}
+	return ListingCacheUse
 }
 
 func (e *Engine) poke() {
@@ -357,6 +377,7 @@ func (e *Engine) step(now time.Time) time.Time {
 		// Periodic triggers.
 		if !rt.nextSafety.IsZero() && !rt.nextSafety.After(now) {
 			rt.due = minTime(rt.due, now)
+			rt.fullListing = true
 			rt.nextSafety = now.Add(time.Duration(st.SafetyFullSyncMinutes) * time.Minute)
 		}
 		if iv := e.remoteInterval(it, st); iv > 0 && !rt.nextRemote.IsZero() && !rt.nextRemote.After(now) {
@@ -709,7 +730,8 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 		if err := os.MkdirAll(e.paths.BisyncWorkdir(it.ID), 0o700); err != nil {
 			return err
 		}
-		b, err := json.Marshal(BisyncParams(it, conn.RcloneRemote, e.paths, e.label(), q.force))
+		r.listingCache = e.listingCacheLocked(it, q.force)
+		b, err := json.Marshal(BisyncParams(it, conn.RcloneRemote, e.paths, e.label(), q.force, r.listingCache))
 		if err != nil {
 			return err
 		}
@@ -926,6 +948,9 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		rt.pendingPaths = map[string]bool{}
 		rt.retryAt = time.Time{}
 		rt.retryCount = 0
+		if r.listingCache == ListingCacheRefresh {
+			rt.fullListing = false
+		}
 		rt.lastNotifiedEr = false
 		// Local changes during the run that were not caused by the sync itself.
 		leftover := foreignChanges(rt.duringRun, r.files)

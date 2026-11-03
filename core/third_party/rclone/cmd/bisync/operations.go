@@ -57,6 +57,7 @@ type bisyncRun struct {
 	queueOpt           bisyncQueueOpt
 	downloadHashOpt    downloadHashOpt
 	lockFileOpt        lockFileOpt
+	listCache          *listCacheFs // CloudWire patch (see docs/adr/0012): incremental Path2 listing
 }
 
 type queues struct {
@@ -263,6 +264,10 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 		}
 	}
 
+	// CloudWire patch (see docs/adr/0012): only a successful run leaves a
+	// listing cache behind.
+	b.startListCache()
+
 	// Create second context with filters
 	var fctx context.Context
 	if fctx, err = b.opt.applyFilters(octx); err != nil {
@@ -312,6 +317,9 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 				fs.Infoc(nil, Color(terminal.GreenFg, "Backup listing is valid."))
 			}
 			b.revertToOldListings()
+			if b.listCache != nil {
+				b.listCache.old = nil // after a failed run, list everything
+			}
 		} else {
 			// On prior critical error abort, the prior listings are renamed to .lst-err to lock out further runs
 			b.critical = true
@@ -475,6 +483,7 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 		}
 	}
 
+	b.saveListCache() // CloudWire patch (see docs/adr/0012)
 	return nil
 }
 

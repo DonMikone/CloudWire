@@ -86,10 +86,28 @@ func ConflictMarker(label string) string {
 	return "." + label + " "
 }
 
+// Checkers is the number of folders bisync lists in parallel per side.
+const Checkers = 16
+
+// bisync's listingCache modes (fork patch, docs/adr/0013): refresh lists the
+// cloud completely and renews the cache, use reuses cloud folders whose ETag
+// and file id did not change since the last successful run.
+const (
+	ListingCacheRefresh = "refresh"
+	ListingCacheUse     = "use"
+)
+
 // BisyncParams builds the sync/bisync rc parameters of an item. force is
-// set only after the user confirmed a Mass-Delete Guard stop.
-func BisyncParams(it store.OfflineItem, remote string, p paths.Paths, label string, force bool) map[string]any {
-	cfg := map[string]any{}
+// set only after the user confirmed a Mass-Delete Guard stop. listingCache
+// is one of the ListingCache modes, "" to keep bisync's default (off).
+func BisyncParams(it store.OfflineItem, remote string, p paths.Paths, label string, force bool, listingCache string) map[string]any {
+	cfg := map[string]any{
+		// A run with no changes is spent almost entirely listing the cloud,
+		// one PROPFIND per folder; rclone's default of 8 parallel listings
+		// leaves most of the round trip idle. 16 stays gentle on hosted
+		// servers (the pacer backs off on 429). Advanced settings override it.
+		"Checkers": Checkers,
+	}
 	for k, v := range it.Advanced {
 		cfg[k] = v
 	}
@@ -117,6 +135,9 @@ func BisyncParams(it store.OfflineItem, remote string, p paths.Paths, label stri
 	}
 	if force {
 		params["force"] = true
+	}
+	if listingCache != "" {
+		params["listingCache"] = listingCache
 	}
 	return params
 }

@@ -511,6 +511,60 @@ func TestPanickedRunRetriesWithBackoff(t *testing.T) {
 	}
 }
 
+// A Nextcloud item lists the cloud completely at Core start, on every safety
+// run and after a failed run; every other run reuses unchanged folders.
+// Other Connections keep bisync's default.
+func TestListingCacheModeFollowsSafetyRunsAndFailures(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	h.addItem("b")
+	h.e.mu.Lock()
+	h.e.rt["a"].remote = &remoteWatch{kind: remoteETag}
+	h.e.mu.Unlock()
+	run := func(id, status string) any {
+		t.Helper()
+		if err := h.e.SyncNow(id); err != nil {
+			t.Fatal(err)
+		}
+		h.step()
+		jobs := h.started()
+		j := jobs[len(jobs)-1]
+		var p map[string]any
+		if err := json.Unmarshal(j.job.Bisync, &p); err != nil {
+			t.Fatal(err)
+		}
+		j.complete(status, "boom")
+		h.waitIdle()
+		return p["listingCache"]
+	}
+	steps := []struct {
+		name, status string
+		safety       bool
+		want         any
+	}{
+		{"Core start", sv.StatusOK, false, ListingCacheRefresh},
+		{"next run", sv.StatusOK, false, ListingCacheUse},
+		{"safety run", sv.StatusOK, true, ListingCacheRefresh},
+		{"after the safety run", sv.StatusError, false, ListingCacheUse},
+		{"retry after a failure", sv.StatusOK, false, ListingCacheRefresh},
+		{"after the retry", sv.StatusOK, false, ListingCacheUse},
+	}
+	for _, s := range steps {
+		if s.safety {
+			h.e.mu.Lock()
+			h.e.rt["a"].nextSafety = h.now
+			h.e.mu.Unlock()
+			h.step()
+		}
+		if got := run("a", s.status); got != s.want {
+			t.Fatalf("%s: listingCache %v, want %v", s.name, got, s.want)
+		}
+	}
+	if got := run("b", sv.StatusOK); got != nil {
+		t.Fatalf("non-Nextcloud item sent listingCache %v", got)
+	}
+}
+
 func massDeleteOf(t *testing.T, e *Engine, id string) *MassDeleteInfo {
 	t.Helper()
 	items, err := e.List()

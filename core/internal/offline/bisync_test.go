@@ -19,7 +19,7 @@ func testPaths() paths.Paths { return paths.ForHome("/Users/mike") }
 func TestBisyncParamsFolder(t *testing.T) {
 	it := store.OfflineItem{ID: "abc", Kind: "folder", RemotePath: "Music/Projekte", StoragePath: "/Users/mike/CloudWire/Nextcloud/Music/Projekte",
 		Advanced: map[string]any{"Checkers": 4}}
-	got := BisyncParams(it, "cw-x1", testPaths(), "Konflikt", false)
+	got := BisyncParams(it, "cw-x1", testPaths(), "Konflikt", false, "")
 	want := map[string]any{
 		"path1":              "/Users/mike/CloudWire/Nextcloud/Music/Projekte",
 		"path2":              "cw-x1:Music/Projekte",
@@ -46,17 +46,26 @@ func TestBisyncParamsFolder(t *testing.T) {
 
 func TestBisyncParamsResyncAndForce(t *testing.T) {
 	it := store.OfflineItem{ID: "f1", Kind: "files", RemotePath: "Music", Files: []string{"a.wav"}, StoragePath: "/Users/mike/CloudWire/NC/Music", NeedsResync: true}
-	got := BisyncParams(it, "cw-x1", testPaths(), "conflict", false)
+	got := BisyncParams(it, "cw-x1", testPaths(), "conflict", false, "")
 	if got["resync"] != true || got["resyncMode"] != "newer" || got["force"] != nil {
 		t.Fatalf("resync item: %#v", got)
 	}
 	if got["path2"] != "cw-x1:Music" || got["conflictSuffix"] != "lokal,conflict {2006-01-02 1504}" {
 		t.Fatalf("files item uses the parent folder: %#v", got)
 	}
+	if cfg := got["_config"].(map[string]any); cfg["Checkers"] != Checkers {
+		t.Fatalf("without an Advanced override, folders are listed %d in parallel: %#v", Checkers, cfg)
+	}
 	it.NeedsResync = false
-	got = BisyncParams(it, "cw-x1", testPaths(), "conflict", true)
+	got = BisyncParams(it, "cw-x1", testPaths(), "conflict", true, "")
 	if got["force"] != true || got["resync"] != nil {
 		t.Fatalf("confirmed mass delete: %#v", got)
+	}
+	if got["listingCache"] != nil {
+		t.Fatalf("without a mode bisync keeps its default (no listing cache): %#v", got)
+	}
+	if got = BisyncParams(it, "cw-x1", testPaths(), "conflict", false, ListingCacheUse); got["listingCache"] != ListingCacheUse {
+		t.Fatalf("listing cache mode not passed: %#v", got)
 	}
 }
 

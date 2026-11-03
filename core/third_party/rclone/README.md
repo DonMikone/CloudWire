@@ -54,6 +54,21 @@ sync.
    Upstream issue: https://github.com/rclone/rclone/issues/XXXX
    (filed by CloudWire; number recorded when the fork is published).
 
+5. **`cmd/bisync/listcache.go`, `cmd/bisync/{cmd,rc,march,operations}.go`,
+   `backend/webdav/webdav.go`, `backend/webdav/api/types.go` —
+   incremental Path2 listing (`--listing-cache off|refresh|use`).**
+   The webdav listing asks for `getetag` and `oc:fileid` and reports
+   them, plus the mount flag (`M` in `oc:permissions`), on a new
+   `webdav.Directory`. Bisync's march lists Path2 through a wrapper that
+   records each folder's raw entries with the markers its parent's
+   listing reported, and with `use` serves a folder from the previous
+   run's record when ETag and file id are unchanged (never for mounts).
+   The cache file `*.path2.lsc` is removed at the start of every run and
+   written only by a successful one. Default `off` behaves like
+   upstream. Rationale: `docs/adr/0013-incremental-cloud-listing.md`.
+   Upstream issue: https://github.com/rclone/rclone/issues/XXXX
+   (filed by CloudWire; number recorded when the fork is published).
+
 All patches carry a `// CloudWire patch (see docs/adr/0012):` comment
 marker so an upstream upgrade can reapply them mechanically.
 

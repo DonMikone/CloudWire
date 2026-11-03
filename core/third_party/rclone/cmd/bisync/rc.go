@@ -140,6 +140,10 @@ func rcBisync(ctx context.Context, in rc.Params) (out rc.Params, err error) {
 	if err = setEnum(in, "conflictLoser", opt.ConflictLoser.String(), opt.ConflictLoser.Set); err != nil {
 		return nil, err
 	}
+	// CloudWire patch (see docs/adr/0012): incremental Path2 listing.
+	if err = setEnum(in, "listingCache", opt.ListingCache.String(), opt.ListingCache.Set); err != nil {
+		return nil, err
+	}
 	if opt.ConflictSuffixFlag, err = in.GetString("conflictSuffix"); rc.NotErrParamNotFound(err) {
 		fs.Debugf("conflictSuffix", "optional parameter is missing. using default value: %v", opt.ConflictSuffixFlag)
 	}

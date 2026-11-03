@@ -32,7 +32,7 @@ func (b *bisyncRun) makeMarchListing(ctx context.Context) (*fileList, *fileList,
 	// set up a march over fdst (Path2) and fsrc (Path1)
 	m := &march.March{
 		Ctx:                    ctx,
-		Fdst:                   b.fs2,
+		Fdst:                   b.marchFs2(), // CloudWire patch (see docs/adr/0012): listing cache
 		Fsrc:                   b.fs1,
 		Dir:                    "",
 		NoTraverse:             false,

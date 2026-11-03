@@ -762,6 +762,9 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 // Read the normal props, plus the checksums
 //
 // <oc:checksums><oc:checksum>SHA1:f572d396fae9206628714fb2ce00f72e94f2258f MD5:b1946ac92492d2347c6235b4d2611184 ADLER32:084b021f</oc:checksum></oc:checksums>
+//
+// CloudWire patch (see docs/adr/0012): getetag and oc:fileid let bisync's
+// listing cache reuse directories that did not change (see Directory).
 var owncloudProps = []byte(`<?xml version="1.0"?>
 <d:propfind  xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
  <d:prop>
@@ -769,6 +772,8 @@ var owncloudProps = []byte(`<?xml version="1.0"?>
   <d:getlastmodified />
   <d:getcontentlength />
   <d:resourcetype />
+  <d:getetag />
+  <oc:fileid />
   <oc:checksums />
   <oc:permissions />
  </d:prop>
@@ -933,9 +938,14 @@ func (f *Fs) ListP(ctx context.Context, dir string, callback fs.ListRCallback) e
 	var iErr error
 	_, err := f.listAll(ctx, dir, false, false, defaultDepth, func(remote string, isDir bool, info *api.Prop) bool {
 		if isDir {
-			d := fs.NewDir(remote, time.Time(info.Modified))
-			// .SetID(info.ID)
-			// FIXME more info from dir? can set size, items?
+			// CloudWire patch (see docs/adr/0012): keep the server's change
+			// markers on the directory for bisync's listing cache.
+			d := &Directory{
+				Dir:     fs.NewDir(remote, time.Time(info.Modified)),
+				etag:    info.ETag,
+				fileID:  info.FileID,
+				mounted: strings.Contains(info.Permissions, "M"),
+			}
 			err := list.Add(d)
 			if err != nil {
 				iErr = err
@@ -963,6 +973,33 @@ func (f *Fs) ListP(ctx context.Context, dir string, callback fs.ListRCallback) e
 	}
 	return list.Flush()
 }
+
+// Directory is a directory of a listing together with the change markers
+// the server reported for it.
+//
+// CloudWire patch (see docs/adr/0012): Nextcloud changes a folder's ETag
+// whenever anything below it changes, so bisync's listing cache
+// (cmd/bisync/listcache.go) can reuse the entries of a folder whose ETag
+// and file id are unchanged. Folders that are mount points (external
+// storage, shares: "M" in oc:permissions) may not propagate changes and are
+// reported as such.
+type Directory struct {
+	*fs.Dir
+	etag    string
+	fileID  string
+	mounted bool
+}
+
+// ETag returns the directory's ETag, "" if the server sent none.
+func (d *Directory) ETag() string { return d.etag }
+
+// FileID returns the directory's file id (oc:fileid), "" if the server sent none.
+func (d *Directory) FileID() string { return d.fileID }
+
+// Mounted reports whether the directory is a mount point (external storage or share).
+func (d *Directory) Mounted() bool { return d.mounted }
+
+var _ fs.Directory = (*Directory)(nil)
 
 // Creates from the parameters passed in a half finished Object which
 // must have setMetaData called on it

@@ -77,6 +77,10 @@ type Prop struct {
 	Checksums    []string  `xml:"prop>checksums>checksum,omitempty"`
 	Permissions  string    `xml:"prop>permissions,omitempty"`
 	MESha1Hex    *string   `xml:"ME: prop>sha1hex,omitempty"` // Fastmail-specific sha1 checksum
+	// CloudWire patch (see docs/adr/0012): change markers for bisync's
+	// listing cache (cmd/bisync/listcache.go).
+	ETag   string `xml:"DAV: prop>getetag,omitempty"`
+	FileID string `xml:"prop>fileid,omitempty"`
 }
 
 // Parse a status of the form "HTTP/1.1 200 OK" or "HTTP/1.1 200"

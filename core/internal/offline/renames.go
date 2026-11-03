@@ -223,7 +223,7 @@ func (e *Engine) renamesAppliedLocked(r *running, rs []sv.Rename) (sv.Command, b
 	if err != nil {
 		return sv.Command{}, false
 	}
-	b, err := json.Marshal(BisyncParams(it, conn.RcloneRemote, e.paths, e.label(), r.q.force))
+	b, err := json.Marshal(BisyncParams(it, conn.RcloneRemote, e.paths, e.label(), r.q.force, r.listingCache))
 	if err != nil {
 		return sv.Command{}, false
 	}

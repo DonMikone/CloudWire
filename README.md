@@ -144,7 +144,8 @@ Design decisions are recorded in [`docs/adr`](docs/adr), and the project vocabul
 - **Pause Rules.** Syncing waits for a 60-second Quiet Period after local changes, and it stops while Studio Mode apps run, on battery, on metered networks, or when the CPU is busy. A running sync is stopped gracefully and resumes later.
 - **Process isolation.** Each Mount runs in its own worker process. A stuck or crashing Mount cannot stall the others or the supervisor. Workers are health-checked every minute and after wake or network changes, and restarted with backoff.
 - **Mounts survive worker restarts.** An NFS Mount's server listens on a fixed localhost port and keeps its file handles on disk. When a worker is restarted, the new one takes over that port and the macOS NFS client simply reconnects, usually within a few seconds; the volume never disappears from Finder.
-- **Low idle cost.** With nothing to sync, the Core consists of the supervisor plus one worker per active Mount. Change detection uses FSEvents locally and cheap remote checks (a single ETag request per Nextcloud item).
+- **Low idle cost.** With nothing to sync, the Core consists of the supervisor plus one worker per active Mount. Change detection uses FSEvents locally and cheap remote checks (one ETag request per Nextcloud item, or per parent folder of a Files item's Selection, so changes elsewhere in the cloud do not trigger a sync).
+- **Incremental cloud listing.** A Nextcloud sync re-lists only the cloud folders whose ETag changed since the last successful run; Core start, the hourly safety run and any failure list everything again ([ADR 0013](docs/adr/0013-incremental-cloud-listing.md)).
 - **Crash recovery.** launchd restarts the Core if it crashes, Mounts are re-established automatically, and bisync runs with `--resilient --recover`.
 
 ## Security

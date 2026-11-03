@@ -3,6 +3,7 @@ package webdav_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,4 +151,63 @@ func TestReservedCharactersInPathAreEscaped(t *testing.T) {
 	// The semicolon must be percent-encoded as %3B
 	assert.Contains(t, capturedPath, "my%3Btest", "semicolons in path should be percent-encoded")
 	assert.NotContains(t, capturedPath, "my;test", "raw semicolons should not appear in path")
+}
+
+// CloudWire patch (see docs/adr/0012): a Nextcloud listing asks for each
+// folder's ETag and file id and reports them, plus the mount flag, on the
+// listed directories (bisync's listing cache relies on them).
+func TestListReportsDirectoryChangeMarkers(t *testing.T) {
+	var body string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = fmt.Fprint(w, `<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+<d:response><d:href>/remote.php/dav/files/mike/</d:href><d:propstat><d:prop>
+ <d:getetag>"root"</d:getetag><oc:fileid>1</oc:fileid><d:resourcetype><d:collection/></d:resourcetype>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/mike/Musik/</d:href><d:propstat><d:prop>
+ <d:getetag>"6721a"</d:getetag><oc:fileid>42</oc:fileid><oc:permissions>RGDNVCK</oc:permissions>
+ <d:getlastmodified>Tue, 19 Dec 2017 22:02:36 GMT</d:getlastmodified><d:resourcetype><d:collection/></d:resourcetype>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/mike/Extern/</d:href><d:propstat><d:prop>
+ <d:getetag>"ext"</d:getetag><oc:fileid>43</oc:fileid><oc:permissions>RGDNVCKM</oc:permissions>
+ <d:resourcetype><d:collection/></d:resourcetype>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/mike/a.txt</d:href><d:propstat><d:prop>
+ <d:getetag>"file"</d:getetag><oc:fileid>44</oc:fileid><d:getcontentlength>3</d:getcontentlength><d:resourcetype/>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>`)
+	}))
+	defer ts.Close()
+
+	configfile.Install()
+	m := configmap.Simple{"type": "webdav", "url": ts.URL + "/remote.php/dav/files/mike", "vendor": "nextcloud"}
+	f, err := webdav.NewFs(context.Background(), remoteName, "", m)
+	require.NoError(t, err)
+
+	entries, err := f.List(context.Background(), "")
+	require.NoError(t, err)
+	assert.Contains(t, body, "<d:getetag />")
+	assert.Contains(t, body, "<oc:fileid />")
+
+	type marked interface {
+		ETag() string
+		FileID() string
+		Mounted() bool
+	}
+	got := map[string]string{}
+	for _, e := range entries {
+		if d, ok := e.(marked); ok {
+			got[e.Remote()] = fmt.Sprintf("%s %s %v", d.ETag(), d.FileID(), d.Mounted())
+		} else {
+			got[e.Remote()] = "object"
+		}
+	}
+	assert.Equal(t, map[string]string{
+		"Musik":  `"6721a" 42 false`,
+		"Extern": `"ext" 43 true`,
+		"a.txt":  "object",
+	}, got)
 }

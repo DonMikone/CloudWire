@@ -34,6 +34,8 @@ unavailable. (warning: may be slow and use lots of data!)
 using with --verbose  
 - ignoreListingChecksum - (bool) Do not use checksums for listings (add --ignore-
 checksum to additionally skip post-copy checksum checks)  
+- listingCache - (string) Reuse Path2 folders whose ETag and file id did not
+change since the last successful run: off|refresh|use (default: off)  
 - maxLock - (Duration) Consider lock files older than this to be expired
 (default: 0 (never expire)) (minimum: 2m)  
 - noCleanup - (bool) Retain working files (useful for troubleshooting and

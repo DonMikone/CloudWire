@@ -61,6 +61,8 @@ type Options struct {
 	ConflictSuffixFlag    string
 	ConflictSuffix1       string
 	ConflictSuffix2       string
+	// CloudWire patch (see docs/adr/0012): incremental Path2 listing (listcache.go).
+	ListingCache ListingCacheMode
 }
 
 // Default values
@@ -151,6 +153,8 @@ func init() {
 	flags.FVarP(cmdFlags, &Opt.ConflictResolve, "conflict-resolve", "", "Automatically resolve conflicts by preferring the version that is: "+ConflictResolveList+" (default: none)", "")
 	flags.FVarP(cmdFlags, &Opt.ConflictLoser, "conflict-loser", "", "Action to take on the loser of a sync conflict (when there is a winner) or on both files (when there is no winner): "+ConflictLoserList+" (default: num)", "")
 	flags.StringVarP(cmdFlags, &Opt.ConflictSuffixFlag, "conflict-suffix", "", Opt.ConflictSuffixFlag, "Suffix to use when renaming a --conflict-loser. Can be either one string or two comma-separated strings to assign different suffixes to Path1/Path2. (default: 'conflict')", "")
+	// CloudWire patch (see docs/adr/0012)
+	flags.FVarP(cmdFlags, &Opt.ListingCache, "listing-cache", "", "Reuse Path2 folders whose ETag and file id did not change since the last successful run: off|refresh|use (default: off)", "")
 	_ = cmdFlags.MarkHidden("debugname")
 	_ = cmdFlags.MarkHidden("localtime")
 	addRC()
