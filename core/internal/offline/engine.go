@@ -617,6 +617,9 @@ func errorReason(it store.OfflineItem) msg.Text {
 	if path, ok := strings.CutPrefix(it.LastError, renameCollisionPrefix); ok {
 		return msg.New("offline.renameCollision", "path", path)
 	}
+	if syncPanicked(it.LastError) {
+		return msg.New("offline.syncCrashed")
+	}
 	if strings.Contains(strings.ToLower(it.LastError), "directory not found") {
 		return msg.New("offline.cloudFolderMissing", "detail", it.LastError)
 	}
@@ -1031,6 +1034,9 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		rt.retryCount++
 		rt.retryAt = now.Add(e.backoff(rt.retryCount))
 		t := msg.New("sync.failed", "name", name, "detail", out.Error)
+		if syncPanicked(out.Error) {
+			t = msg.New("sync.crashed", "name", name)
+		}
 		e.log.Error("sync", it.ID, t, map[string]any{"runId": r.runID})
 		if !rt.lastNotifiedEr {
 			rt.lastNotifiedEr = true

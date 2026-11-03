@@ -332,6 +332,7 @@ public struct CoreText: Sendable, Hashable {
         },
         "offline.syncFailed": { a in String(localized: "Syncing failed", bundle: a.bundle) },
         "offline.cloudFolderMissing": { a in String(localized: "The cloud folder was not found. Restore it in the cloud or remove the Offline Item.", bundle: a.bundle) },
+        "offline.syncCrashed": { a in String(localized: "The sync hit an internal error. CloudWire retries automatically; details are in the Activity Log.", bundle: a.bundle) },
         "offline.pausedByRule": { a in String(localized: "Syncing paused", bundle: a.bundle) },
         "offline.rulesInactive": { a in String(localized: "Pause Rules no longer apply; syncing resumes", bundle: a.bundle) },
         "offline.pausedManually": { a in String(localized: "Syncing paused until resumed", bundle: a.bundle) },
@@ -424,6 +425,10 @@ public struct CoreText: Sendable, Hashable {
         "sync.failed": { a in
             guard let name = a["name"] else { return nil }
             return String(localized: "Sync of “\(name)” failed", bundle: a.bundle)
+        },
+        "sync.crashed": { a in
+            guard let name = a["name"] else { return nil }
+            return String(localized: "Sync of “\(name)” hit an internal error; CloudWire retries automatically", bundle: a.bundle)
         },
         "sync.listingsLost": { a in
             guard let name = a["name"] else { return nil }

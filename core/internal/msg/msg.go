@@ -125,6 +125,7 @@ var templates = map[string]string{
 	"offline.storageOverlapsItem":  `The storage location overlaps the Offline Item "{name}" ({path})`,
 	"offline.syncFailed":           "Syncing failed",
 	"offline.cloudFolderMissing":   "The cloud folder was not found. Restore it in the cloud or remove the Offline Item.",
+	"offline.syncCrashed":          "The sync hit an internal error. CloudWire retries automatically; details are in the Activity Log.",
 	"offline.pausedByRule":         "Syncing paused",
 	"offline.rulesInactive":        "Pause Rules no longer active; syncing resumes",
 	"offline.pausedManually":       "Syncing paused until resumed",
@@ -150,6 +151,7 @@ var templates = map[string]string{
 	"sync.conflicts":    `{count} conflict copies created in "{name}"`,
 	"sync.massDelete":   `Mass-Delete Guard stopped "{name}"`,
 	"sync.failed":       `Sync of "{name}" failed`,
+	"sync.crashed":      `Sync of "{name}" hit an internal error; CloudWire retries automatically`,
 	"sync.listingsLost": `Sync state of "{name}" was lost; both sides are compared again and deleted files may reappear`,
 
 	"pause.studioMode":         "Studio Mode ({app})",

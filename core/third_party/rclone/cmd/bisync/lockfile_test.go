@@ -78,3 +78,21 @@ func TestLockfileIsExpired_ValidNotExpired(t *testing.T) {
 	b := newTestLockfileBisyncRun(t, string(content), fs.Duration(5*time.Minute))
 	assert.False(t, b.lockFileIsExpired(), "valid lockfile with future expiry should not be expired")
 }
+
+// CloudWire patch 4: after a panic the lock must not block the next run
+// until --max-lock expires, and the listings must be untrusted like after
+// an expired lock.
+func TestReleaseAfterPanicFreesLockAndMarksListingsFailed(t *testing.T) {
+	b := newTestLockfileBisyncRun(t, "{}", fs.Duration(2*time.Minute))
+	lockPath := b.lockFile
+	b.lockFileOpt.stopRenewal = func() {}
+
+	b.releaseAfterPanic()
+
+	assert.NoFileExists(t, lockPath)
+	assert.Empty(t, b.lockFile)
+	for _, l := range []string{b.listing1, b.listing2} {
+		assert.NoFileExists(t, l)
+		assert.FileExists(t, l+"-err")
+	}
+}

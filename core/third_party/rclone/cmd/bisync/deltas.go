@@ -393,8 +393,13 @@ func (b *bisyncRun) applyDeltas(ctx context.Context, ds1, ds2 *deltaSet) (result
 				// if files are identical, leave them alone instead of renaming
 				if (dirs1.has(file) || dirs1.has(alias)) && (dirs2.has(file) || dirs2.has(alias)) {
 					fs.Infof(nil, "This is a directory, not a file. Skipping equality check and will not rename: %s", file)
-					b.march.ls1.getPut(file, skippedDirs1)
-					b.march.ls2.getPut(file, skippedDirs2)
+					// CloudWire patch (see docs/adr/0012): look each side up under the name it
+					// carries. A directory new on both sides whose names differ only in Unicode
+					// normalization (macOS NFD vs cloud NFC) exists in ls2 only under its alias;
+					// looking it up by the Path1 name returned nil and panicked in getPut.
+					// Upstream issue filed by CloudWire.
+					b.march.ls1.getPut(b.march.ls1.getTryAlias(file, alias), skippedDirs1)
+					b.march.ls2.getPut(b.march.ls2.getTryAlias(file, alias), skippedDirs2)
 					b.debugFn(file, func() {
 						b.debug(file, fmt.Sprintf("deltas dir: %s, ls1 has name?: %v, ls2 has name?: %v", file, b.march.ls1.has(b.DebugName), b.march.ls2.has(b.DebugName)))
 					})

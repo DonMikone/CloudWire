@@ -65,6 +65,19 @@ func (b *bisyncRun) removeLockFile() (err error) {
 	return err
 }
 
+// releaseAfterPanic does at once what an expired lock does on the next run
+// (lockFileIsExpired): the listings are untrusted, so they are marked failed
+// (--recover reverts to the -old backups), and the lock is removed so the
+// following run is not refused with "prior lock file found" until
+// --max-lock expires. The panic itself keeps propagating to the caller.
+// CloudWire patch (see docs/adr/0012): Upstream issue filed by CloudWire.
+func (b *bisyncRun) releaseAfterPanic() {
+	fs.Logf(nil, "Bisync run panicked: marking listings failed and removing the lock file")
+	markFailed(b.listing1)
+	markFailed(b.listing2)
+	_ = b.removeLockFile() // logs its own error
+}
+
 func (b *bisyncRun) setLockFileExpiration() {
 	if b.opt.MaxLock > 0 && b.opt.MaxLock < fs.Duration(2*time.Minute) {
 		fs.Logf(nil, Color(terminal.YellowFg, "--max-lock cannot be shorter than 2 minutes (unless 0.) Changing --max-lock from %v to %v"), b.opt.MaxLock, 2*time.Minute)

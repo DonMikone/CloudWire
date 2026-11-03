@@ -6663,6 +6663,17 @@
         }
       }
     },
+    "Sync of “%@” hit an internal error; CloudWire retries automatically" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisation von „%@“: interner Fehler, CloudWire versucht es automatisch erneut"
+          }
+        }
+      }
+    },
     "Sync state of “%@” was lost; both sides are compared again and deleted files may reappear" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7462,6 +7473,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Der Speicherort überschneidet sich mit dem Offline-Element „%1$@“ (%2$@)"
+          }
+        }
+      }
+    },
+    "The sync hit an internal error. CloudWire retries automatically; details are in the Activity Log." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interner Fehler bei der Synchronisation. CloudWire versucht es automatisch erneut; Details stehen im Aktivitätsprotokoll."
           }
         }
       }

@@ -30,11 +30,35 @@ sync.
    Upstream issue: https://github.com/rclone/rclone/issues/XXXX
    (filed by CloudWire; number recorded when the fork is published).
 
-Both patches carry a `// CloudWire patch (see docs/adr/0012):` comment
+3. **`cmd/bisync/deltas.go` — directories new on both sides are looked
+   up under each side's own name.** In `applyDeltas`, a directory that
+   is new on both sides is recorded as skipped via
+   `ls2.getPut(file, …)` with the Path1 name. For normalization twins
+   (local NFD, cloud NFC) that name is not in the Path2 listing, so
+   `getPut` dereferenced nil and the run panicked ("invalid memory
+   address or nil pointer dereference"), every run. The patch looks each
+   listing up with `getTryAlias(file, alias)`, as the rest of the
+   function already does, so each listing keeps its side's name.
+   Upstream issue: https://github.com/rclone/rclone/issues/XXXX
+   (filed by CloudWire; number recorded when the fork is published).
+
+4. **`cmd/bisync/operations.go`, `cmd/bisync/lockfile.go` — a panic
+   releases the lock and marks the listings failed.** The rc job
+   recovers a panic in the run and the process lives on, but the lock
+   file stayed behind: the next runs failed with "prior lock file
+   found" until `--max-lock` expired. `Bisync` now calls
+   `releaseAfterPanic` from a deferred function when `runLocked` does
+   not return; it does at once what an expired lock does on the next
+   run (listings marked failed, lock removed). The panic is not
+   recovered there and keeps its stack for the rc job.
+   Upstream issue: https://github.com/rclone/rclone/issues/XXXX
+   (filed by CloudWire; number recorded when the fork is published).
+
+All patches carry a `// CloudWire patch (see docs/adr/0012):` comment
 marker so an upstream upgrade can reapply them mechanically.
 
 ## Upgrading
 
-Replace the tree with the new upstream release, reapply the two patches
+Replace the tree with the new upstream release, reapply the patches
 (marked with `// CloudWire patch (see docs/adr/0012):`), update this
 README, and keep the `replace` directive in `core/go.mod` pointing here.

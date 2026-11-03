@@ -471,6 +471,46 @@ func TestFailedRunsBackOff(t *testing.T) {
 	}
 }
 
+// A run that panicked inside rclone ("panic received: …") is an error like
+// any other for state and retry, but logs and notifies a translatable
+// message instead of the raw panic text.
+func TestPanickedRunRetriesWithBackoff(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	if err := h.e.SyncNow("a"); err != nil {
+		t.Fatal(err)
+	}
+	h.step()
+	jobs := h.started()
+	jobs[len(jobs)-1].complete(sv.StatusError, "panic received: boom")
+	h.waitIdle()
+	if it := h.state("a"); it.State != StateError {
+		t.Fatalf("state %s", it.State)
+	}
+	if got := h.e.rt["a"].retryAt; !got.Equal(h.now.Add(h.e.backoff(1))) {
+		t.Fatalf("retryAt %v, want the first backoff step", got)
+	}
+	if len(h.notify.kinds) != 1 || h.notify.kinds[0] != "error" {
+		t.Fatalf("notifications %v", h.notify.kinds)
+	}
+	got, err := h.st.QueryActivity(store.ActivityFilter{Levels: []string{"error"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	crashed := false
+	for _, a := range got {
+		switch a.Code {
+		case "sync.crashed":
+			crashed = true
+		case "sync.failed":
+			t.Fatalf("panic logged as sync.failed: %+v", a)
+		}
+	}
+	if !crashed {
+		t.Fatalf("no sync.crashed entry: %+v", got)
+	}
+}
+
 func massDeleteOf(t *testing.T, e *Engine, id string) *MassDeleteInfo {
 	t.Helper()
 	items, err := e.List()
@@ -1070,26 +1110,24 @@ func TestStatusForNestedStorage(t *testing.T) {
 func TestErrorReason(t *testing.T) {
 	const missing = `error reading source root directory: Directory Not Found`
 	for _, c := range []struct {
-		state, reason, code string
+		state, reason, code, detail string
 	}{
-		{StateError, missing, "offline.cloudFolderMissing"},
-		{StateError, "couldn't connect: 503 Service Unavailable", "offline.syncFailed"},
-		{StateError, "", ""},
-		{StatePaused, pauserules.RuleBattery, ""},
-		{StatePaused, ReasonLocationMissing, ""},
-		{StateNeedsConfirmation, "too many deletes", ""},
+		{StateError, missing, "offline.cloudFolderMissing", missing},
+		{StateError, "couldn't connect: 503 Service Unavailable", "offline.syncFailed", "couldn't connect: 503 Service Unavailable"},
+		// The panic text stays in LastError but is not shown in the item row.
+		{StateError, "panic received: runtime error: invalid memory address or nil pointer dereference", "offline.syncCrashed", ""},
+		{StateError, "", "", ""},
+		{StatePaused, pauserules.RuleBattery, "", ""},
+		{StatePaused, ReasonLocationMissing, "", ""},
+		{StateNeedsConfirmation, "too many deletes", "", ""},
 	} {
 		got := errorReason(store.OfflineItem{State: c.state, LastError: c.reason})
 		if got.Code != c.code {
 			t.Errorf("%s %q: code %q, want %q", c.state, c.reason, got.Code, c.code)
 		}
 		// The raw reason is never translated: it travels as the detail.
-		want := ""
-		if c.code != "" {
-			want = c.reason
-		}
-		if got.Detail() != want {
-			t.Errorf("%s %q: detail %q, want %q", c.state, c.reason, got.Detail(), want)
+		if got.Detail() != c.detail {
+			t.Errorf("%s %q: detail %q, want %q", c.state, c.reason, got.Detail(), c.detail)
 		}
 	}
 }

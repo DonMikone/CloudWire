@@ -354,6 +354,49 @@ func TestRecoverAfterNormalizationMismatch(t *testing.T) {
 	}
 }
 
+// A directory new on both sides whose names differ only in Unicode
+// normalization (macOS NFD locally, NFC in the cloud) made applyDeltas look
+// the Path2 listing up by the Path1 name, get nil and panic ("panic received:
+// runtime error: invalid memory address or nil pointer dereference"), every
+// run. Patch 3 in core/third_party/rclone looks each side up under its own name.
+func TestNormalizationTwinDirsNewOnBothSides(t *testing.T) {
+	pr := newPair(t, "folder")
+	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	write(t, filepath.Join(pr.local, "a.txt"), "a", base)
+	if err := pr.sync(false); err != nil {
+		t.Fatalf("initial resync: %v", err)
+	}
+	nfd, nfc := "Daten fu\u0308r Barbosi", "Daten f\u00fcr Barbosi"
+	write(t, filepath.Join(pr.local, nfd, "v.wav"), "vox", base)
+	write(t, filepath.Join(pr.cloud, nfc, "v.wav"), "vox", base)
+	if err := pr.sync(false); err != nil {
+		t.Fatalf("twin directories new on both sides: %v", err)
+	}
+	// Each listing carries the directory under its own side's name, so the
+	// next run no longer sees it as new.
+	for side, name := range map[string]string{"path1": nfd, "path2": nfc} {
+		lists, err := filepath.Glob(filepath.Join(pr.p.BisyncWorkdir(pr.item.ID), "*."+side+".lst"))
+		if err != nil || len(lists) != 1 {
+			t.Fatalf("%s listing %v %v", side, lists, err)
+		}
+		if got := read(t, lists[0]); !strings.Contains(got, fmt.Sprintf("%q\n", name)) {
+			t.Fatalf("%s listing lacks directory %q:\n%s", side, name, got)
+		}
+	}
+	if err := pr.sync(false); err != nil {
+		t.Fatalf("run after the twin directories: %v", err)
+	}
+	dirs := 0
+	for _, n := range names(t, pr.local) {
+		if strings.HasPrefix(n, "Daten") {
+			dirs++
+		}
+	}
+	if dirs != 1 {
+		t.Fatalf("local entries %v; want exactly one Daten… directory", names(t, pr.local))
+	}
+}
+
 func lostListingsInLog() bool {
 	logMu.Lock()
 	defer logMu.Unlock()

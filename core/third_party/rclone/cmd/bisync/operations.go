@@ -178,7 +178,16 @@ func Bisync(ctx context.Context, fs1, fs2 fs.Fs, optArg *Options) (err error) {
 	defer atexit.Unregister(fnHandle)
 
 	// run bisync
+	// CloudWire patch (see docs/adr/0012): a panic in the run is recovered by
+	// the rc job (the process lives on) and must not leave the lock behind.
+	panicked := true
+	defer func() {
+		if panicked {
+			b.releaseAfterPanic()
+		}
+	}()
 	err = b.runLocked(ctx)
+	panicked = false
 
 	removeLockErr := b.removeLockFile()
 	if err == nil {

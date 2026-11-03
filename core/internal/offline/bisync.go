@@ -66,6 +66,13 @@ func lostListings(logMsg string) bool {
 		strings.Contains(logMsg, "cannot find prior Path1 or Path2 listings")
 }
 
+// syncPanicked reports whether a run's error is a panic that rclone's rc job
+// recovered (fs/rc/jobs.Job.run: "panic received: …"); the stack is in the
+// Activity Log as an rclone.error entry.
+func syncPanicked(errText string) bool {
+	return strings.HasPrefix(errText, "panic received:")
+}
+
 // ConflictSuffix returns bisync's conflictSuffix. Path1 (local) always wins
 // and keeps its name; the cloud version is saved as
 // "<name>.<label> 2006-01-02 1504.<ext>". The first element only has to
