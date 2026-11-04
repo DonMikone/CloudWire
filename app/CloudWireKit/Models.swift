@@ -131,6 +131,27 @@ public struct CoreInfo: Decodable, Sendable, Hashable {
     }
 }
 
+/// Result of `core.restartForUpdate`: the Core stops for the App's version now, or says what it waits for.
+public struct UpdateRestart: Decodable, Sendable, Hashable {
+    public var restarting: Bool
+    /// What postpones the restart (a running sync or Studio Mode app); nil when restarting.
+    public var reason: CoreText?
+
+    public init(restarting: Bool, reason: CoreText?) {
+        self.restarting = restarting
+        self.reason = reason
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        restarting = c.bool("restarting")
+        if let raw = c.optional("reason", as: JSONValue.self), !raw.isNull {
+            reason = CoreText(code: raw["code"]?.stringValue, params: raw["params"]?.stringMap ?? [:],
+                              message: raw["message"]?.stringValue ?? "")
+        }
+    }
+}
+
 /// Result of methods without a meaningful value (`{}`); accepts anything.
 public struct EmptyResult: Decodable, Sendable {
     public init() {}

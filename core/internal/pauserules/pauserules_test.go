@@ -12,6 +12,7 @@ import (
 
 type fakeProbes struct {
 	exes                   []string
+	bundleIDs              map[string]string
 	battery, lowPower      bool
 	expensive, constrained bool
 	known                  bool
@@ -23,10 +24,11 @@ func (f *fakeProbes) OnBattery() bool                       { return f.battery }
 func (f *fakeProbes) LowPowerMode() bool                    { return f.lowPower }
 func (f *fakeProbes) Network() (bool, bool, bool)           { return f.expensive, f.constrained, f.known }
 func (f *fakeProbes) CPUTicks() (uint64, uint64, error)     { return f.busy, f.total, nil }
+func (f *fakeProbes) BundleID(b string) string              { return f.bundleIDs[b] }
 
 func newEval(p *fakeProbes, mutate func(*store.Settings)) *Evaluator {
 	st := store.DefaultSettings()
-	st.PauseRules.StudioMode.Apps = []string{"/Applications/REAPER.app"}
+	st.PauseRules.StudioMode = StudioModeDefaults([]string{"/Applications/REAPER.app"})
 	if mutate != nil {
 		mutate(&st)
 	}
@@ -55,6 +57,61 @@ func TestStudioMode(t *testing.T) {
 	off := newEval(p, func(s *store.Settings) { s.PauseRules.StudioMode.Enabled = false })
 	if len(off.Evaluate()) != 0 {
 		t.Fatal("disabled rule active")
+	}
+}
+
+// logicProcesses is what proc_pidpath reports while Logic Pro runs: its main
+// executable, its helpers and system services hosting its plug-ins.
+var logicProcesses = []string{
+	"/sbin/launchd",
+	"/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder",
+	"/Applications/Logic Pro.app/Contents/MacOS/Logic Pro",
+	"/Applications/Logic Pro.app/Contents/PlugIns/LogicProThumbnailExtension.appex/Contents/MacOS/LogicProThumbnailExtension",
+	"/System/Library/Frameworks/AudioToolbox.framework/AudioComponentRegistrar",
+	"/System/Library/Frameworks/AudioToolbox.framework/XPCServices/AUHostingServiceXPC_arrow.xpc/Contents/MacOS/AUHostingServiceXPC_arrow",
+	"/Applications/Universal Audio/UAD Meter & Control Panel.app/Contents/MacOS/UAD Meter & Control Panel",
+}
+
+func TestStudioModeLogicPro(t *testing.T) {
+	logic := func(s *store.Settings) {
+		s.PauseRules.StudioMode = StudioModeDefaults([]string{"/Applications/GarageBand.app", "/Applications/Logic Pro.app"})
+	}
+	p := &fakeProbes{exes: logicProcesses}
+	if got := ids(newEval(p, logic).Evaluate()); got[RuleStudioMode] != "Logic Pro" {
+		t.Fatalf("Logic Pro not detected: %v", got)
+	}
+	// Paths compare like APFS: without case and Unicode normalisation.
+	p.exes = []string{"/Applications/LOGIC PRO.app/Contents/MacOS/Logic Pro"}
+	if got := ids(newEval(p, logic).Evaluate()); got[RuleStudioMode] != "Logic Pro" {
+		t.Fatalf("case-insensitive path not matched: %v", got)
+	}
+	nfd := func(s *store.Settings) {
+		s.PauseRules.StudioMode = StudioModeDefaults([]string{"/Applications/Studio\u0308.app"})
+	}
+	p.exes = []string{"/Applications/Studi\u00f6.app/Contents/MacOS/x"}
+	if got := ids(newEval(p, nfd).Evaluate()); got[RuleStudioMode] == "" {
+		t.Fatalf("NFC/NFD paths not matched: %v", got)
+	}
+	// A copy elsewhere (moved, translocated) matches by bundle identifier.
+	moved := "/private/var/folders/xy/T/AppTranslocation/0F1E/d/Logic Pro.app"
+	p.exes = []string{moved + "/Contents/MacOS/Logic Pro"}
+	p.bundleIDs = map[string]string{"/Applications/Logic Pro.app": "com.apple.logic10", moved: "com.apple.logic10"}
+	if got := ids(newEval(p, logic).Evaluate()); got[RuleStudioMode] != "Logic Pro" {
+		t.Fatalf("Logic Pro copy not matched by bundle id: %v", got)
+	}
+	// Logic's own extensions and Audio Unit hosts alone do not count.
+	p.exes = logicProcesses[3:]
+	if got := ids(newEval(p, logic).Evaluate()); got[RuleStudioMode] != "" {
+		t.Fatalf("helpers without Logic matched: %v", got)
+	}
+	// Off: no pause, but the Core still sees Logic for update restarts.
+	p.exes = logicProcesses
+	off := newEval(p, func(s *store.Settings) { logic(s); s.PauseRules.StudioMode.Enabled = false })
+	if got := ids(off.Evaluate()); got[RuleStudioMode] != "" {
+		t.Fatalf("disabled Studio Mode paused: %v", got)
+	}
+	if app := off.StudioAppRunning(); app != "Logic Pro" {
+		t.Fatalf("StudioAppRunning = %q", app)
 	}
 }
 
@@ -172,5 +229,19 @@ func TestDetectDAWs(t *testing.T) {
 	want := []string{filepath.Join(root, "Audio/Ableton Live 12 Suite.app"), filepath.Join(root, "REAPER.app")}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("DetectDAWs = %v, want %v", got, want)
+	}
+}
+
+func TestStudioModeDefaults(t *testing.T) {
+	root := t.TempDir()
+	if sm := StudioModeDefaults(DetectDAWs(root)); sm.Enabled || sm.Apps == nil || len(sm.Apps) != 0 {
+		t.Fatalf("without a DAW Studio Mode must be off: %+v", sm)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "Logic Pro.app", "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sm := StudioModeDefaults(DetectDAWs(root))
+	if !sm.Enabled || len(sm.Apps) != 1 || sm.Apps[0] != filepath.Join(root, "Logic Pro.app") {
+		t.Fatalf("with Logic Pro installed Studio Mode must be on: %+v", sm)
 	}
 }

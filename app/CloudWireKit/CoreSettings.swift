@@ -26,6 +26,7 @@ public struct CoreSettings: Decodable, Sendable, Hashable {
     public static let defaultExcludes = [
         ".DS_Store", "._*", ".Spotlight-V100/**", ".Trashes/**", ".fseventsd/**", ".TemporaryItems/**",
         ".DocumentRevisions-V100/**",
+        "*.logicx/Alternatives/*/Autosave/**", "*.band/Alternatives/*/Autosave/**", "Auto Saves/**",
     ]
 
     /// The documented defaults (Appendix E).
@@ -69,7 +70,7 @@ public struct CoreSettings: Decodable, Sendable, Hashable {
 
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
-            studioMode = c.optional("studioMode") ?? StudioMode(enabled: true, apps: [])
+            studioMode = c.optional("studioMode") ?? StudioMode(enabled: false, apps: [])
             battery = c.optional("battery") ?? Toggle(enabled: true)
             meteredNetwork = c.optional("meteredNetwork") ?? Toggle(enabled: true)
             cpu = c.optional("cpu") ?? CPU(enabled: true, thresholdPercent: 70, windowSeconds: 30)

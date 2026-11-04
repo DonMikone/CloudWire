@@ -104,9 +104,28 @@ func TestExcluded(t *testing.T) {
 		"Bassline.wav":            false,
 		"Sub/Trashes/x.wav":       false,
 		"Mix.wav.x1Y2.partial":    true,
+		"._Folder/Take.wav":       false, // file rules exclude names, not folders (as in rclone)
+		// DAW autosaves churn while a project is open; their backups stay synced.
+		"Musikprojekte/X/Song.logicx/Alternatives/000/Autosave/2026-11-02 12:14:48Z.songData": true,
+		"Song.logicx/Alternatives/000/Autosave":                                               true,
+		"Song.logicx/Alternatives/001/Autosave/x":                                             true,
+		"Song.logicx/Alternatives/000/ProjectData":                                            false,
+		"Song.logicx/Alternatives/000/Project File Backups/00.cst":                            false,
+		"Song.logicx/Alternatives/000/Media/Autosave/x":                                       false,
+		"Autosave/x.wav":                               false,
+		"Song.band/Alternatives/000/Autosave/x":        true,
+		"Cubase/Song/Auto Saves/Song-01.bak":           true,
+		"Cubase/Song/Project File Backups/Song-01.cpr": false,
+		"Cubase/Song/Song.cpr":                         false,
 	} {
 		if got := Excluded(rel, ex); got != want {
 			t.Errorf("Excluded(%q) = %v, want %v", rel, got, want)
+		}
+	}
+	// A leading "/" anchors a pattern at the root; a trailing "/" excludes a folder.
+	for rel, want := range map[string]bool{"Stems/a.wav": true, "Song/Stems/a.wav": false, "Bounces/x/y.wav": true, "Bounces": true} {
+		if got := Excluded(rel, []string{"/Stems/**", "Bounces/"}); got != want {
+			t.Errorf("anchored Excluded(%q) = %v, want %v", rel, got, want)
 		}
 	}
 }

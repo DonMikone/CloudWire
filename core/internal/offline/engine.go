@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rclone/rclone/cmd/bisync"
 	"golang.org/x/sys/unix"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
@@ -19,6 +20,7 @@ import (
 	"github.com/DonMikone/CloudWire/core/internal/notify"
 	"github.com/DonMikone/CloudWire/core/internal/paths"
 	"github.com/DonMikone/CloudWire/core/internal/pauserules"
+	"github.com/DonMikone/CloudWire/core/internal/selection"
 	"github.com/DonMikone/CloudWire/core/internal/store"
 	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
@@ -121,6 +123,12 @@ type running struct {
 	// bisync reported unusable listings: the next run resyncs
 	lostListings bool
 	listingCache string // bisync's listingCache mode of this run ("" = off)
+	// bisync left files for a later run (still being written or a transfer
+	// failed, docs/adr/0014): schedule one after the Quiet Period
+	leftForLater bool
+	// bisync rolled back files it could not transfer: the run is reported
+	// as failed (error state, retry backoff) with this text
+	transferFailed string
 }
 
 type itemRT struct {
@@ -129,7 +137,7 @@ type itemRT struct {
 	nextRemote     time.Time
 	nextSafety     time.Time
 	retryAt        time.Time
-	retryCount     int // consecutive failed runs; scales the retry backoff
+	retryCount     int             // consecutive failed runs; scales the retry backoff
 	pendingPaths   map[string]bool // absolute paths changed locally since the last ok run
 	duringRun      map[string]bool // relative paths changed while syncing
 	progress       *Progress
@@ -206,6 +214,11 @@ type Engine struct {
 	done        chan struct{}
 	closed      bool
 	started     bool
+	// asleepUntil holds new jobs back after Sleep until Wake (or this time,
+	// should the wake never be reported).
+	asleepUntil time.Time
+	// restartHeld holds new jobs back: the Core stops for an update.
+	restartHeld bool
 
 	// preflightCancel cancels the running size measurement (Preflight).
 	preflightMu     sync.Mutex
@@ -235,6 +248,12 @@ func (e *Engine) label() string {
 		return l
 	}
 	return "conflict"
+}
+
+// settleTime is how long a local file must stay unchanged before a run
+// uploads it: the Quiet Period (docs/adr/0014).
+func (e *Engine) settleTime() time.Duration {
+	return time.Duration(e.settings().QuietPeriodSeconds) * time.Second
 }
 
 // Start loads the items, starts watchers and the scheduler loop. Every item
@@ -424,10 +443,11 @@ func (e *Engine) step(now time.Time) time.Time {
 		e.Eval.ResetCPU()
 		e.nextCPU = time.Time{}
 	}
-	// A running job is re-checked against the Pause Rules every 10 s.
+	// A running job is re-checked against the Pause Rules every few seconds,
+	// so a starting DAW stops it promptly.
 	if e.cur != nil {
 		if !e.cur.q.ignorePause && !e.cur.stopping && !e.nextPause.After(now) {
-			e.nextPause = now.Add(10 * time.Second)
+			e.nextPause = now.Add(pauseCheckInterval)
 			if reason, paused := e.pausedLocked(now); paused {
 				e.stopCurrentLocked(reason)
 			}
@@ -435,7 +455,12 @@ func (e *Engine) step(now time.Time) time.Time {
 		earliest(e.nextPause)
 		return next
 	}
-	// Start the next job (FIFO, one at a time).
+	// Start the next job (FIFO, one at a time), except while the Mac goes to
+	// sleep or the Core stops for an update.
+	if e.restartHeld || now.Before(e.asleepUntil) {
+		earliest(e.asleepUntil)
+		return next
+	}
 	for len(e.queue) > 0 {
 		q := e.queue[0]
 		if q.migration == nil {
@@ -465,7 +490,7 @@ func (e *Engine) step(now time.Time) time.Time {
 			slog.Error("offline: start job", "err", err)
 			continue
 		}
-		e.nextPause = now.Add(10 * time.Second)
+		e.nextPause = now.Add(pauseCheckInterval)
 		earliest(e.nextPause)
 		break
 	}
@@ -713,8 +738,15 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 		}
 		if !it.NeedsResync && len(before) > 0 && string(before) != filtersContent(it) {
 			// Only an update changes the rules of an unchanged Selection (e.g. the
-			// spelling-tolerant rules). They match the same paths in more spellings,
-			// so bisync's hash is renewed instead of demanding a resync.
+			// spelling-tolerant rules, new default excludes), so bisync's hash is
+			// renewed instead of demanding a resync. Newly excluded paths leave the
+			// listings: bisync then ignores them on both sides instead of seeing
+			// them deleted on both.
+			if err := identity.ForgetExcluded(e.paths.BisyncWorkdir(it.ID), func(p string) bool {
+				return selection.Excluded(p, it.Excludes)
+			}); err != nil {
+				return err
+			}
 			if err := identity.WriteFiltersHash(f); err != nil {
 				return err
 			}
@@ -731,7 +763,7 @@ func (e *Engine) startLocked(q queued, now time.Time) error {
 			return err
 		}
 		r.listingCache = e.listingCacheLocked(it, q.force)
-		b, err := json.Marshal(BisyncParams(it, conn.RcloneRemote, e.paths, e.label(), q.force, r.listingCache))
+		b, err := json.Marshal(BisyncParams(it, conn.RcloneRemote, e.paths, e.label(), q.force, r.listingCache, e.settleTime()))
 		if err != nil {
 			return err
 		}
@@ -849,6 +881,16 @@ func (e *Engine) onLog(r *running, l sv.LogLine, label string) {
 		}
 		e.log.Error("sync", subject, msg.New("rclone.error", "detail", l.Msg), map[string]string{"object": l.Object})
 	default:
+		if strings.Contains(l.Msg, bisync.LeftForLaterRun) {
+			e.mu.Lock()
+			r.leftForLater = true
+			e.mu.Unlock()
+		}
+		if strings.Contains(l.Msg, bisync.TransfersFailed) {
+			e.mu.Lock()
+			r.transferFailed = l.Msg
+			e.mu.Unlock()
+		}
 		if e.log.Enabled("debug") {
 			e.log.Debug("sync", subject, msg.Detail(l.Msg), map[string]string{"object": l.Object, "level": l.Level})
 		}
@@ -868,19 +910,31 @@ func safetyAbort(l sv.LogLine) string {
 	return text
 }
 
-// stopCurrentLocked stops the running job gracefully (30 s, then SIGKILL)
+// pauseCheckInterval is how often a running job is checked against the
+// Pause Rules.
+const pauseCheckInterval = 5 * time.Second
+
+// stopGrace is how long a stopped job may take to end cleanly before its
+// worker is killed. bisync cancels its transfers at once, records the
+// completed ones and saves its listings, normally within seconds.
+const stopGrace = 30 * time.Second
+
+// stopCurrentLocked stops the running job cleanly (stopGrace, then SIGKILL)
 // and puts it back at the head of the queue.
 func (e *Engine) stopCurrentLocked(reason string) {
-	e.requeueCurrentLocked(StatePaused, reason)
+	e.requeueCurrentLocked(StatePaused, reason, stopGrace)
 }
 
 // interruptCurrentLocked stops the running job gracefully so it runs again
-// at once: a synced path was renamed or deleted during the run (ADR 0011).
+// at once: the Storage Location itself moved (followRoot). Changes inside it
+// never interrupt a run (ADR 0014).
 func (e *Engine) interruptCurrentLocked() {
-	e.requeueCurrentLocked(StatePending, "")
+	e.requeueCurrentLocked(StatePending, "", stopGrace)
 }
 
-func (e *Engine) requeueCurrentLocked(state, reason string) {
+// requeueCurrentLocked stops the running job cleanly (grace, then SIGKILL)
+// and puts it back at the head of the queue in state.
+func (e *Engine) requeueCurrentLocked(state, reason string, grace time.Duration) {
 	r := e.cur
 	if r == nil || r.stopping {
 		return
@@ -892,13 +946,23 @@ func (e *Engine) requeueCurrentLocked(state, reason string) {
 			e.setStateLocked(it, state, reason)
 		}
 	}
-	go r.job.Stop(30 * time.Second)
+	go r.job.Stop(grace)
 }
 
 func (e *Engine) finishLocked(r *running, out sv.Msg) {
 	status := out.Status
 	if status == "" {
 		status = sv.StatusError
+	}
+	if status == sv.StatusError && r.stopping {
+		// A job we stopped may end with the interruption as its error; it
+		// was re-queued and is no failure.
+		status = sv.StatusStopped
+	}
+	if status == sv.StatusOK && r.transferFailed != "" {
+		// The listings are consistent, but files were left untransferred: a
+		// failure the user must see, retried with backoff (docs/adr/0014).
+		status, out.Error = sv.StatusError, r.transferFailed
 	}
 	var files []store.SyncRunFile
 	counts := map[string]int{}
@@ -954,7 +1018,7 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		rt.lastNotifiedEr = false
 		// Local changes during the run that were not caused by the sync itself.
 		leftover := foreignChanges(rt.duringRun, r.files)
-		if len(leftover) > 0 {
+		if len(leftover) > 0 || r.leftForLater {
 			for _, rel := range leftover {
 				rt.pendingPaths[filepath.Join(it.StoragePath, rel)] = true
 			}
@@ -964,7 +1028,7 @@ func (e *Engine) finishLocked(r *running, out sv.Msg) {
 		// Prune deleted entries only when nothing changed locally during the
 		// run and the Selection did not change meanwhile (a new entry is not
 		// downloaded yet): only then does the local tree mirror the cloud.
-		if e.adjustSelectionLocked(&it, len(leftover) == 0 && r.resyncGen == rt.resyncGen) {
+		if e.adjustSelectionLocked(&it, len(leftover) == 0 && !r.leftForLater && r.resyncGen == rt.resyncGen) {
 			rt.due = now
 		}
 		if err := e.st.UpdateOfflineItem(it); err != nil {

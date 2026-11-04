@@ -134,6 +134,19 @@ public struct CoreText: Sendable, Hashable {
         "core.networkOffline": { a in String(localized: "Network changed (offline)", bundle: a.bundle) },
         "core.sleeping": { a in String(localized: "The Mac is going to sleep", bundle: a.bundle) },
         "core.woke": { a in String(localized: "The Mac woke from sleep", bundle: a.bundle) },
+        "core.updateDeferred": { a in
+            guard let version = a["version"] else { return nil }
+            return String(localized: "Restart for CloudWire \(version) postponed", bundle: a.bundle)
+        },
+        "core.restartingForUpdate": { a in
+            guard let version = a["version"] else { return nil }
+            return String(localized: "Restarting the background service for CloudWire \(version)", bundle: a.bundle)
+        },
+        "update.waitingForSync": { a in String(localized: "A sync is running", bundle: a.bundle) },
+        "update.waitingForStudioApp": { a in
+            guard let app = a["app"] else { return nil }
+            return String(localized: "\(app) is running", bundle: a.bundle)
+        },
         "connection.notFound": { a in
             guard let id = a["id"] else { return nil }
             return String(localized: "Connection \(id) not found", bundle: a.bundle)

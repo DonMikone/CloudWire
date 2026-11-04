@@ -515,7 +515,12 @@ func (s *syncCopyMove) pairCopyOrMove(ctx context.Context, in *pipe, fdst fs.Fs,
 				err = operations.DeleteFile(ctx, src)
 			}
 		} else {
-			_, err = operations.Copy(ctx, fdst, dst, src.Remote(), src)
+			var newDst fs.Object
+			newDst, err = operations.Copy(ctx, fdst, dst, src.Remote(), src)
+			if err == nil {
+				// CloudWire patch (see docs/adr/0012, docs/adr/0014)
+				operations.ReportTransferDone(ctx, src, newDst)
+			}
 		}
 		s.processError(err)
 		if err != nil {

@@ -412,7 +412,7 @@ func (e *Engine) stopItem(id string) {
 	e.stopWatchingLocked(id)
 	e.mu.Unlock()
 	if job != nil {
-		job.Stop(30 * time.Second)
+		job.Stop(stopGrace)
 		<-job.Done()
 		// The finisher may have re-queued it.
 		e.mu.Lock()
@@ -1047,7 +1047,7 @@ func (e *Engine) CancelMigration(jobID string) bool {
 		r.canceled, found = true, true
 		if !r.stopping { // a Pause Rule stop is already underway otherwise
 			r.stopping = true
-			go r.job.Stop(30 * time.Second)
+			go r.job.Stop(stopGrace)
 		}
 	}
 	return found
@@ -1078,19 +1078,46 @@ func (e *Engine) ResumeForConnection(connID string) {
 	}
 }
 
-// Sleep stops the running job gracefully before the Mac sleeps; it runs
-// again (bisync --recover) after wake.
+// sleepStopGrace bounds the clean stop before sleep so the worker is killed,
+// if it must be, before macOS stops waiting for the acknowledgement.
+const sleepStopGrace = platform.MaxSleepDelay - 5*time.Second
+
+// sleepHold holds new jobs back after Sleep should the wake go unreported.
+const sleepHold = 2 * time.Minute
+
+// Sleep stops the running job cleanly before the Mac sleeps and returns once
+// it ended (the caller holds the sleep back meanwhile). No job starts until
+// Wake; the stopped one runs again first.
 func (e *Engine) Sleep() {
 	e.mu.Lock()
+	e.asleepUntil = e.Now().Add(sleepHold)
 	r := e.cur
-	if r != nil && !r.stopping {
-		r.stopping = true
-		e.queue = append([]queued{r.q}, e.queue...)
-	}
+	e.requeueCurrentLocked(StatePending, "", sleepStopGrace)
 	e.mu.Unlock()
-	if r != nil {
-		r.job.Stop(4 * time.Second)
+	if r == nil {
+		return
 	}
+	select {
+	case <-r.job.Done():
+	case <-time.After(sleepStopGrace):
+		r.job.Stop(0) // a stop with a longer grace was underway
+	}
+}
+
+// HoldForRestart reports what keeps the Core from restarting for an update
+// now: a running job or a running Studio Mode app (also with Studio Mode
+// off). When nothing does, no further job starts, so the Core can stop.
+func (e *Engine) HoldForRestart() (msg.Text, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cur != nil {
+		return msg.New("update.waitingForSync"), true
+	}
+	if app := e.Eval.StudioAppRunning(); app != "" {
+		return msg.New("update.waitingForStudioApp", "app", app), true
+	}
+	e.restartHeld = true
+	return msg.Text{}, false
 }
 
 // Wake marks every item for a remote check (wake, network regained).
@@ -1098,6 +1125,7 @@ func (e *Engine) Wake() {
 	now := e.Now()
 	items, _ := e.st.OfflineItems()
 	e.mu.Lock()
+	e.asleepUntil = time.Time{}
 	for _, it := range items {
 		rt := e.itemRT(it.ID)
 		if rt.remote != nil && rt.remote.kind == remoteETag {
@@ -1129,7 +1157,7 @@ func (e *Engine) Stop() {
 	e.mu.Unlock()
 	close(e.quit)
 	if r != nil {
-		r.job.Stop(30 * time.Second)
+		r.job.Stop(stopGrace)
 	}
 	if started {
 		<-e.done

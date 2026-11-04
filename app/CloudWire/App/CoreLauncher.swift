@@ -1,3 +1,4 @@
+import AppKit
 import CloudWireKit
 import Foundation
 import Security
@@ -19,13 +20,23 @@ enum CoreLauncherError: Error, LocalizedError {
     }
 }
 
+/// The connected Core and, after an App update, what keeps it on its previous version.
+struct CoreLaunch {
+    var info: CoreInfo
+    /// Why the Core has not restarted into the App's version yet (a sync or Studio Mode app runs); nil
+    /// when it runs this build.
+    var pendingUpdate: CoreText? = nil
+}
+
 /// Starts the Core LaunchAgent and connects to it.
 ///
-/// 1. Registers the bundled agent with `SMAppService` (fallback for ad-hoc builds that
-///    `SMAppService` rejects: a user LaunchAgent plist loaded with `launchctl bootstrap`).
-/// 2. Touches `run/start-request` so the Core's autostart gate lets it start.
-/// 3. `launchctl kickstart`, then connects with retries (100 ms doubling to 1 s, 10 s total).
-/// 4. Restarts the Core once when its version differs from the App's.
+/// 1. Connects to a Core that already runs, e.g. the previous version after an App update.
+/// 2. Otherwise registers the bundled agent with `SMAppService` (fallback for ad-hoc builds that
+///    `SMAppService` rejects: a user LaunchAgent plist loaded with `launchctl bootstrap`), touches
+///    `run/start-request` so the Core's autostart gate lets it start, runs `launchctl kickstart`, then
+///    connects with retries (100 ms doubling to 1 s, 10 s total).
+/// 3. Restarts the Core once when it is another version or build than the App's, but only while no sync
+///    runs and no Studio Mode app is open; until then the update is pending and the old Core keeps running.
 @MainActor
 enum CoreLauncher {
     private static let log = Logger(subsystem: CorePaths.bundleIdentifier, category: "CoreLauncher")
@@ -47,16 +58,20 @@ enum CoreLauncher {
         !(ProcessInfo.processInfo.environment["CLOUDWIRE_HOME"] ?? "").isEmpty
     }
 
-    static func ensureRunning(client: CoreClient) async throws -> CoreInfo {
+    static func ensureRunning(client: CoreClient) async throws -> CoreLaunch {
         if await client.isConnected, let info = try? await client.coreInfo() {
-            return isIsolatedHome ? info : try await checkVersion(info, client: client)
+            return isIsolatedHome ? CoreLaunch(info: info) : try await checkUpdate(info, client: client)
         }
         if isIsolatedHome {
-            return try await connectWithRetries(client)
+            return CoreLaunch(info: try await connectWithRetries(client))
+        }
+        // Registering the agent anew stops a running Core, so a running one decides first.
+        if let info = try? await connectOnce(client) {
+            return try await checkUpdate(info, client: client)
         }
         try registerAgent()
         let info = try await startAndConnect(client)
-        return try await checkVersion(info, client: client)
+        return try await checkUpdate(info, client: client)
     }
 
     /// Kickstarts the agent and connects. When launchd cannot start the `SMAppService` agent (it
@@ -228,11 +243,9 @@ enum CoreLauncher {
         var lastError: any Error = CoreError.notConnected()
         while ContinuousClock.now < deadline {
             do {
-                try await client.connect()
-                return try await client.coreInfo()
+                return try await connectOnce(client)
             } catch {
                 lastError = error
-                await client.disconnect()
                 try await Task.sleep(for: delay)
                 delay = min(delay * 2, .seconds(1))
             }
@@ -240,11 +253,36 @@ enum CoreLauncher {
         throw CoreLauncherError.unreachable(ErrorText.alert(for: lastError).message)
     }
 
-    private static func checkVersion(_ info: CoreInfo, client: CoreClient) async throws -> CoreInfo {
-        guard info.version != appVersion, !versionRestartDone, !appVersion.isEmpty else { return info }
+    private static func connectOnce(_ client: CoreClient) async throws -> CoreInfo {
+        do {
+            try await client.connect()
+            return try await client.coreInfo()
+        } catch {
+            await client.disconnect()
+            throw error
+        }
+    }
+
+    /// Whether `registerAgent` would register the `SMAppService` agent anew, which stops the running Core:
+    /// launchd runs another build of `cloudwire-core` than the bundled one.
+    private static var registrationStale: Bool {
+        guard let hash = coreCDHash(), UserDefaults.standard.string(forKey: fallbackHashKey) != hash,
+              agentService.status == .enabled
+        else { return false }
+        return UserDefaults.standard.string(forKey: registeredHashKey) != hash
+    }
+
+    private static func checkUpdate(_ info: CoreInfo, client: CoreClient) async throws -> CoreLaunch {
+        guard !appVersion.isEmpty, !versionRestartDone, info.version != appVersion || registrationStale else {
+            return CoreLaunch(info: info)
+        }
+        let restart = try await requestRestart(client)
+        guard restart.restarting else {
+            log.notice("Core \(info.version, privacy: .public) waits to restart into App \(appVersion, privacy: .public): \(restart.reason?.message ?? "", privacy: .public)")
+            return CoreLaunch(info: info, pendingUpdate: restart.reason)
+        }
         versionRestartDone = true
         log.notice("Core \(info.version, privacy: .public) differs from App \(appVersion, privacy: .public); restarting")
-        try? await client.shutdown()
         await client.disconnect()
         // Stopping sync jobs and Mounts can take a while; kickstart is a no-op while the old Core runs.
         let exited = try await waitForExit(pid: info.pid, timeout: .seconds(45))
@@ -253,7 +291,33 @@ enum CoreLauncher {
         }
         try registerAgent()
         // A failure here says nothing about launchd refusing the agent: no user LaunchAgent fallback.
-        return try await startAndConnect(client, allowFallback: false)
+        return CoreLaunch(info: try await startAndConnect(client, allowFallback: false))
+    }
+
+    /// Asks the Core to stop for the App's version; it refuses while a sync or a Studio Mode app runs (a DAW
+    /// may be recording). A Core from before `core.restartForUpdate` gets the same check from the App.
+    private static func requestRestart(_ client: CoreClient) async throws -> UpdateRestart {
+        do {
+            return try await client.restartForUpdate(version: appVersion)
+        } catch let error as CoreError where error.code == "rpc.-32601" {
+            if let reason = await legacyRestartBlocker(client) {
+                return UpdateRestart(restarting: false, reason: reason)
+            }
+            try? await client.shutdown()
+            return UpdateRestart(restarting: true, reason: nil)
+        }
+    }
+
+    private static func legacyRestartBlocker(_ client: CoreClient) async -> CoreText? {
+        if let items = try? await client.offlineItems(), items.contains(where: { $0.state == .syncing }) {
+            return CoreText(code: "update.waitingForSync", message: "A sync is running")
+        }
+        let apps = (try? await client.settings())?.pauseRules.studioMode.apps ?? []
+        let key = { (url: URL) in url.standardizedFileURL.path.precomposedStringWithCanonicalMapping.lowercased() }
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL.map(key) })
+        guard let app = apps.first(where: { running.contains(key(URL(fileURLWithPath: $0))) }) else { return nil }
+        let name = URL(fileURLWithPath: app).deletingPathExtension().lastPathComponent
+        return CoreText(code: "update.waitingForStudioApp", params: ["app": name], message: "\(name) is running")
     }
 
     /// Polls until process `pid` is gone (`kill(pid, 0)` fails with `ESRCH`); false on timeout.

@@ -63,6 +63,13 @@ type Options struct {
 	ConflictSuffix2       string
 	// CloudWire patch (see docs/adr/0012): incremental Path2 listing (listcache.go).
 	ListingCache ListingCacheMode
+	// CloudWire patch (see docs/adr/0014): per-file journal of what the run
+	// itself wrote; a Path2 change counts only if the journal cannot explain
+	// it. Replaced local files go to the macOS Trash via LocalTrash.
+	Journal bool
+	// CloudWire patch (see docs/adr/0014): Path1 files changed less than
+	// SettleTime ago are not uploaded in this run (they are still being written).
+	SettleTime fs.Duration
 }
 
 // Default values

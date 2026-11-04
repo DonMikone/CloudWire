@@ -56,6 +56,26 @@ func TestRunningExecutablesContainsSelf(t *testing.T) {
 	t.Fatalf("own executable %s not among %d processes", exe, len(paths))
 }
 
+func TestBundleIdentifier(t *testing.T) {
+	app := filepath.Join(t.TempDir(), "Logic Pro.app")
+	if err := os.MkdirAll(filepath.Join(app, "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plist := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.apple.logic10</string>
+<key>CFBundleExecutable</key><string>Logic Pro</string></dict></plist>`
+	if err := os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(plist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if id := BundleIdentifier(app); id != "com.apple.logic10" {
+		t.Fatalf("BundleIdentifier = %q", id)
+	}
+	if id := BundleIdentifier(filepath.Join(t.TempDir(), "Missing.app")); id != "" {
+		t.Fatalf("missing bundle has id %q", id)
+	}
+}
+
 func TestCPUTicksMonotonic(t *testing.T) {
 	b1, t1, err := CPUTicks()
 	if err != nil {

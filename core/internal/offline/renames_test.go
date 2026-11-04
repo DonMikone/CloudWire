@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fsnotify/fsevents"
 	"golang.org/x/sys/unix"
 
 	"github.com/DonMikone/CloudWire/core/internal/identity"
@@ -145,48 +144,6 @@ func (h *harness) startRun(id string) *fakeJob {
 		h.t.Fatalf("no run of %s started: %+v", id, jobs)
 	}
 	return jobs[len(jobs)-1]
-}
-
-func TestRenameDuringRunInterruptsIt(t *testing.T) {
-	h := newHarness(t)
-	h.addItem("a")
-	j := h.startRun("a")
-	// bisync's own work: a deleted file and a Conflict Copy it renamed.
-	h.e.onLog(h.e.cur, sv.LogLine{Level: "info", Msg: "Deleted", Object: "x.wav"}, "Konflikt")
-	h.e.localChange("a", "x.wav", fsevents.ItemRemoved, true, h.now)
-	h.e.localChange("a", "Song.Konflikt 2026-09-27 1713.wav", fsevents.ItemRenamed, true, h.now)
-	// A folder removed outright is left to the next run; an ordinary change is recorded.
-	h.e.localChange("a", "Old", fsevents.ItemRemoved|fsevents.ItemIsDir, true, h.now)
-	h.e.localChange("a", "New.wav", fsevents.ItemCreated, false, h.now)
-	h.e.mu.Lock()
-	stopping := h.e.cur.stopping
-	h.e.mu.Unlock()
-	if stopping {
-		t.Fatal("the sync's own changes stopped it")
-	}
-
-	// The user renames a synced folder: the run stops and goes first again.
-	h.e.localChange("a", "Tree/B", fsevents.ItemRenamed|fsevents.ItemIsDir, true, h.now)
-	<-j.done
-	h.waitIdle()
-	j.mu.Lock()
-	stopped := j.stopped
-	j.mu.Unlock()
-	h.e.mu.Lock()
-	head := len(h.e.queue) > 0 && h.e.queue[0].itemID == "a"
-	h.e.mu.Unlock()
-	if !stopped || !head || h.state("a").State != StatePending {
-		t.Fatalf("stopped=%v head=%v state=%s", stopped, head, h.state("a").State)
-	}
-
-	// Without a run, the next one starts at once instead of after the Quiet Period.
-	h.e.mu.Lock()
-	h.e.queue = nil
-	h.e.mu.Unlock()
-	h.e.localChange("a", "Tree/C/deleted.wav", fsevents.ItemRemoved, true, h.now)
-	if rt := h.e.rt["a"]; !rt.quietUntil.IsZero() || !rt.due.Equal(h.now) {
-		t.Fatalf("due %v quiet until %v", rt.due, rt.quietUntil)
-	}
 }
 
 func TestRenamesMessageContinuesTheRun(t *testing.T) {

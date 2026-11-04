@@ -3,8 +3,9 @@
 #
 # Runs an isolated Core (CLOUDWIRE_HOME in a temp dir, separate Keychain
 # service) and drives it through `cloudwire-core rpc`. The real user state is
-# never touched. Requires Docker, curl and jq. E2E_KEEP=1 keeps the state for
-# debugging.
+# never touched, except that the journal checks briefly put two cwe2e-* test
+# files into the Trash and remove them again. Requires Docker, curl and jq.
+# E2E_KEEP=1 keeps the state for debugging.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -170,6 +171,92 @@ exists_remote Bulk/f0.wav && ok "cloud files untouched" || fail "cloud files del
 rpc offline.confirmMassDelete "{\"id\":\"$BID\",\"action\":\"restore\"}" >/dev/null
 restored() { [ "$(ls "$BP" | wc -l | tr -d ' ')" = 10 ]; }
 wait_for 60 "\"Nicht löschen\" restored the files" restored
+
+log "Journal: no Conflict Copies from CloudWire's own uploads (docs/adr/0014)"
+for d in Studio Studio/Song.logicx Studio/Song.logicx/Alternatives Studio/Song.logicx/Alternatives/000 "Studio/Audio%20Files"; do dav -X MKCOL "$(dav_url "$d")" >/dev/null; done
+printf 'project v1' | dav -T - "$(dav_url Studio/Song.logicx/Alternatives/000/ProjectData)"
+FOREIGN="cwe2e-$$-foreign.txt"
+GONE="cwe2e-$$-deleted.txt"
+printf 'foreign v1' | dav -T - "$(dav_url "Studio/$FOREIGN")"
+printf 'delete me' | dav -T - "$(dav_url "Studio/$GONE")"
+SID_="$(rpc offline.create "{\"connectionId\":\"$CID\",\"kind\":\"folder\",\"remotePath\":\"Studio\"}" | jq -r .id)"
+STP="$(rpc offline.list | jq -r ".[] | select(.id==\"$SID_\") | .storagePath")"
+PD="$STP/Song.logicx/Alternatives/000/ProjectData"
+studio_idle() { rpc offline.list | jq -e ".[] | select(.id==\"$SID_\") | .state == \"idle\" and .lastSyncAt != null and .needsResync == false" >/dev/null; }
+wait_for 60 "studio item synced" studio_idle
+no_conflicts() { ! find "$STP" -name "*.$LABEL *" | grep -q .; }
+remote_is() { [ "$(dav "$(dav_url "$1")")" = "$2" ]; }
+listings_lost() { rpc activity.query '{"limit":500}' | jq -e "map(select(.subjectId==\"$SID_\" and .code==\"sync.listingsLost\")) | length > 0" >/dev/null; }
+
+# (1) A take that grows while it is uploaded: never a lost sync state, never a Conflict Copy.
+TAKE="$STP/Audio Files/Bass #63.aif"
+: >"$TAKE"
+for i in $(seq 1 12); do head -c 1048576 /dev/urandom >>"$TAKE"; rpc offline.syncNow "{\"id\":\"$SID_\"}" >/dev/null 2>&1 || true; sleep 0.5; done
+take_uploaded() { studio_idle && [ "$(dav "$(dav_url "Studio/Audio%20Files/Bass%20%2363.aif")" | wc -c | tr -d ' ')" = "$(wc -c <"$TAKE" | tr -d ' ')" ]; }
+wait_for 120 "growing take uploaded once complete" take_uploaded
+! listings_lost && ok "sync state kept while the take grew" || fail "listings lost while a file grew"
+no_conflicts && ok "no Conflict Copy from a growing file" || fail "conflict copy from a growing file"
+
+# (2) Logic-like churn: Autosave files appear and vanish every second while the project is saved.
+AS="$STP/Song.logicx/Alternatives/000/Autosave"
+mkdir -p "$AS"
+for i in $(seq 1 15); do
+  printf "autosave $i" >"$AS/2026-11-02 12:00:$i.songData"
+  [ "$i" -gt 1 ] && rm -f "$AS/2026-11-02 12:00:$((i - 1)).songData"
+  [ $((i % 3)) = 0 ] && printf "project v2 save $i" >"$PD"
+  sleep 1
+done
+rm -rf "$AS"
+churn_synced() { studio_idle && remote_is Studio/Song.logicx/Alternatives/000/ProjectData "project v2 save 15"; }
+wait_for 120 "project saved during churn uploaded" churn_synced
+missing_remote Studio/Song.logicx/Alternatives/000/Autosave && ok "Autosave stays local" || fail "Autosave uploaded"
+no_conflicts && ok "no Conflict Copy from Autosave churn" || fail "conflict copy from churn"
+rpc offline.runs "{\"itemId\":\"$SID_\",\"limit\":50}" | jq -e 'map(select(.status == "stopped")) | length == 0' >/dev/null \
+  && ok "no run was stopped by the churn" || fail "runs stopped by churn: $(rpc offline.runs "{\"itemId\":\"$SID_\",\"limit\":50}" | jq -c 'map(.status)')"
+
+# (3) The incident: a run killed mid-upload after the project was uploaded, then another save.
+rpc settings.update '{"partial":{"bandwidth":{"enabled":true,"uploadMiBps":1,"downloadMiBps":20}}}' >/dev/null
+printf 'project v3 comp' >"$PD"
+head -c 20971520 /dev/urandom >"$STP/Audio Files/Bass #64.aif"
+pd_v3_up() { remote_is Studio/Song.logicx/Alternatives/000/ProjectData "project v3 comp"; }
+wait_for 60 "project uploaded while the take is still uploading" pd_v3_up
+pkill -9 -f "$BIN worker" || true
+ok "worker killed mid-upload"
+printf 'project v4 more takes!' >"$PD"
+rpc settings.update '{"partial":{"bandwidth":{"enabled":true,"uploadMiBps":0,"downloadMiBps":20}}}' >/dev/null
+recovered() { studio_idle && pd4_remote && [ "$(dav "$(dav_url "Studio/Audio%20Files/Bass%20%2364.aif")" | wc -c | tr -d ' ')" = 20971520 ]; }
+pd4_remote() { remote_is Studio/Song.logicx/Alternatives/000/ProjectData "project v4 more takes!"; }
+wait_for 300 "recovered after the kill (lock expiry included)" recovered
+[ "$(cat "$PD")" = "project v4 more takes!" ] && ok "local project kept" || fail "local project replaced"
+no_conflicts && ok "no Conflict Copy of the own upload after the kill" || fail "conflict copy after the kill: $(find "$STP" -name "*.$LABEL *")"
+
+# (4) Lost listings and a resync: newer content saved with an older modtime wins over the own upload.
+WD="$CW_HOME/Library/Application Support/CloudWire/bisync/$SID_"
+rm -f "$WD"/*.lst "$WD"/*.lst-old "$WD"/*.lst-err "$WD"/*.lst-new
+printf 'project v5 older mtime' >"$PD"
+touch -t 202001010101 "$PD"
+rpc offline.syncNow "{\"id\":\"$SID_\"}" >/dev/null
+pd5_remote() { studio_idle && remote_is Studio/Song.logicx/Alternatives/000/ProjectData "project v5 older mtime"; }
+wait_for 180 "resync kept the local project" pd5_remote
+[ "$(cat "$PD")" = "project v5 older mtime" ] && ok "local project not replaced by the older upload" || fail "resync replaced the local project"
+no_conflicts && ok "no Conflict Copy from the resync" || fail "conflict copy from the resync"
+
+# (5) A change made by someone else still arrives; the replaced local version goes to the Trash.
+printf 'foreign v2 from the web' | dav -T - "$(dav_url "Studio/$FOREIGN")"
+foreign_local() { [ "$(cat "$STP/$FOREIGN" 2>/dev/null)" = "foreign v2 from the web" ]; }
+wait_for 90 "Cloud Change downloaded" foreign_local
+# The replaced or deleted local file lands in the user's Trash under its name; removed again below.
+trashed() { find "$HOME/.Trash" -maxdepth 1 -name "${1%.txt}*" | grep -q .; }
+wait_for 30 "replaced local version moved to the Trash" trashed "$FOREIGN"
+no_conflicts && ok "no Conflict Copy for a one-sided Cloud Change" || fail "conflict copy for a Cloud Change"
+
+# (6) A file deleted in the cloud by someone else goes to the local Trash.
+dav -X DELETE "$(dav_url "Studio/$GONE")" >/dev/null
+gone_local() { [ ! -e "$STP/$GONE" ]; }
+wait_for 90 "cloud deletion applied locally" gone_local
+wait_for 30 "deleted local file moved to the Trash" trashed "$GONE"
+[ -z "$(ls -A "$WD"/*.trash 2>/dev/null)" ] && ok "no file left in the staging folder" || fail "staging folder not empty"
+find "$HOME/.Trash" -maxdepth 1 -name "cwe2e-$$-*" -exec rm -f {} + 2>/dev/null || true
 
 log "Files item"
 OVERLAP="$(rpc offline.create "{\"connectionId\":\"$CID\",\"kind\":\"files\",\"remotePath\":\"Music/Loops\",\"files\":[\"loop1.wav\"]}" 2>&1 || true)"

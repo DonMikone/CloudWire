@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/DonMikone/CloudWire/core/internal/msg"
 	"github.com/DonMikone/CloudWire/core/internal/platform"
 	"github.com/DonMikone/CloudWire/core/internal/store"
@@ -31,6 +33,8 @@ type Probes interface {
 	// Network returns expensive/constrained and whether the state is known.
 	Network() (expensive, constrained, known bool)
 	CPUTicks() (busy, total uint64, err error)
+	// BundleID returns the CFBundleIdentifier of the app bundle at path ("" if none).
+	BundleID(bundle string) string
 }
 
 // ActiveRule is a rule that currently pauses syncing. Detail is the running
@@ -51,6 +55,7 @@ type Evaluator struct {
 	samples   []float64
 	lastBusy  uint64
 	lastTotal uint64
+	bundleIDs map[string]string // bundle path -> CFBundleIdentifier ("" = none)
 }
 
 // SampleCPU records the CPU utilisation since the previous sample. Call it
@@ -110,11 +115,9 @@ func (e *Evaluator) Evaluate() []ActiveRule {
 	st := e.Settings()
 	var out []ActiveRule
 	pr := st.PauseRules
-	if pr.StudioMode.Enabled && len(pr.StudioMode.Apps) > 0 {
-		if exes, err := e.Probes.RunningExecutables(); err == nil {
-			if app := runningApp(pr.StudioMode.Apps, exes); app != "" {
-				out = append(out, ActiveRule{ID: RuleStudioMode, Detail: app, Text: msg.New("pause.studioMode", "app", app)})
-			}
+	if pr.StudioMode.Enabled {
+		if app := e.runningStudioApp(pr.StudioMode.Apps); app != "" {
+			out = append(out, ActiveRule{ID: RuleStudioMode, Detail: app, Text: msg.New("pause.studioMode", "app", app)})
 		}
 	}
 	if pr.Battery.Enabled {
@@ -142,18 +145,88 @@ func (e *Evaluator) Evaluate() []ActiveRule {
 	return out
 }
 
-// runningApp returns the name of the first listed app bundle with a running
-// executable inside <bundle>/Contents/MacOS/.
-func runningApp(apps, exes []string) string {
+// StudioAppRunning returns the name of a running Studio Mode app, also while
+// Studio Mode is off ("" if none runs). The Core does not restart for an
+// update while one runs.
+func (e *Evaluator) StudioAppRunning() string {
+	return e.runningStudioApp(e.Settings().PauseRules.StudioMode.Apps)
+}
+
+// appExeDir marks a bundle's main executables: <bundle>.app/Contents/MacOS/.
+const appExeDir = ".app/Contents/MacOS/"
+
+// runningStudioApp returns the name of the first listed app bundle with a
+// running executable inside <bundle>/Contents/MacOS/. Paths compare without
+// case and Unicode normalisation (APFS ignores both); a running bundle at
+// another path, e.g. a moved or translocated copy, matches by its
+// CFBundleIdentifier.
+func (e *Evaluator) runningStudioApp(apps []string) string {
+	if len(apps) == 0 {
+		return ""
+	}
+	exes, err := e.Probes.RunningExecutables()
+	if err != nil {
+		return ""
+	}
+	seen := map[string]bool{}
+	var running []string
+	for _, exe := range exes {
+		i := strings.Index(exe, appExeDir)
+		if i < 0 {
+			continue
+		}
+		b := exe[:i+len(".app")]
+		if k := pathKey(b); !seen[k] {
+			seen[k] = true
+			running = append(running, b)
+		}
+	}
 	for _, app := range apps {
-		prefix := strings.TrimRight(app, "/") + "/Contents/MacOS/"
-		for _, exe := range exes {
-			if strings.HasPrefix(exe, prefix) {
-				return strings.TrimSuffix(filepath.Base(app), ".app")
-			}
+		if seen[pathKey(app)] {
+			return appName(app)
+		}
+	}
+	byID := map[string]string{}
+	for _, app := range apps {
+		if id := e.bundleID(app); id != "" && byID[id] == "" {
+			byID[id] = app
+		}
+	}
+	if len(byID) == 0 {
+		return ""
+	}
+	for _, b := range running {
+		if id := e.bundleID(b); id != "" && byID[id] != "" {
+			return appName(byID[id])
 		}
 	}
 	return ""
+}
+
+// bundleID returns the cached bundle identifier of the bundle at path.
+func (e *Evaluator) bundleID(path string) string {
+	e.mu.Lock()
+	id, ok := e.bundleIDs[path]
+	e.mu.Unlock()
+	if ok {
+		return id
+	}
+	id = e.Probes.BundleID(path)
+	e.mu.Lock()
+	if e.bundleIDs == nil {
+		e.bundleIDs = map[string]string{}
+	}
+	e.bundleIDs[path] = id
+	e.mu.Unlock()
+	return id
+}
+
+func pathKey(p string) string {
+	return strings.ToLower(norm.NFC.String(filepath.Clean(p)))
+}
+
+func appName(app string) string {
+	return strings.TrimSuffix(filepath.Base(app), ".app")
 }
 
 // BwLimit returns rclone's core/bwlimit rate "UP:DOWN" in MiB/s, with "off"
@@ -200,6 +273,15 @@ func DetectDAWs(roots ...string) []string {
 	return out
 }
 
+// StudioModeDefaults returns the Studio Mode settings of a new installation:
+// the installed DAWs, and on when there is at least one.
+func StudioModeDefaults(daws []string) store.StudioModeSettings {
+	if daws == nil {
+		daws = []string{}
+	}
+	return store.StudioModeSettings{Enabled: len(daws) > 0, Apps: daws}
+}
+
 // System implements Probes with the real platform APIs.
 type System struct{}
 
@@ -220,3 +302,6 @@ func (System) Network() (bool, bool, bool) {
 
 // CPUTicks implements Probes.
 func (System) CPUTicks() (uint64, uint64, error) { return platform.CPUTicks() }
+
+// BundleID implements Probes.
+func (System) BundleID(bundle string) string { return platform.BundleIdentifier(bundle) }

@@ -209,6 +209,12 @@ func (b *bisyncRun) preCopy(ctx context.Context) context.Context {
 		fs.Debugf(nil, "overriding equal")
 		ctx = b.EqualFn(ctx)
 	}
+	if b.opt.Resync && b.journal != nil && !b.resyncIs1to2 {
+		// CloudWire patch (see docs/adr/0014): a journal resync copies a file
+		// present on both sides to Path1 only where the cloud version wins.
+		overridingEqual = true
+		ctx = b.resyncEqualFn(ctx)
+	}
 	ctxCopyLogger := operations.WithSyncLogger(ctx, b.queueOpt.logger)
 	if b.opt.Compare.Checksum && (b.opt.Compare.NoSlowHash || b.opt.Compare.SlowHashSyncOnly) && b.opt.Compare.SlowHashDetected {
 		// set here in case !b.opt.Compare.Modtime
@@ -228,6 +234,7 @@ func (b *bisyncRun) fastCopy(ctx context.Context, fsrc, fdst fs.Fs, files bilib.
 		return nil, nil
 	}
 	ctx = b.preCopy(ctx)
+	ctx = b.withJournal(ctx, fsrc) // CloudWire patch (see docs/adr/0014)
 	if err := b.saveQueue(files, queueName); err != nil {
 		return nil, err
 	}
@@ -245,11 +252,14 @@ func (b *bisyncRun) fastCopy(ctx context.Context, fsrc, fdst fs.Fs, files bilib.
 		}
 	}
 
-	b.SyncCI = fs.GetConfig(ctxCopy)                       // allows us to request graceful shutdown
 	accounting.Stats(ctxCopy).SetMaxCompletedTransfers(-1) // we need a complete list in the event of graceful shutdown
+	cfgCopy := fs.GetConfig(ctxCopy)
 	ctxCopy, cancel := context.WithCancel(ctxCopy)
 	defer cancel()
+	// CloudWire patch (see docs/adr/0014): CancelSync is set before SyncCI, which
+	// the graceful shutdown checks before calling it.
 	b.CancelSync = cancel
+	b.SyncCI = cfgCopy // allows us to request graceful shutdown
 	b.testFn()
 	err := sync.Sync(ctxCopy, fdst, fsrc, b.opt.CreateEmptySrcDirs)
 	prettyprint(b.queueOpt.logger, "b.queueOpt.logger", fs.LogLevelDebug)
@@ -292,6 +302,7 @@ func (b *bisyncRun) retryFastCopy(ctx context.Context, fsrc, fdst fs.Fs, files b
 
 func (b *bisyncRun) resyncDir(ctx context.Context, fsrc, fdst fs.Fs) ([]Results, error) {
 	ctx = b.preCopy(ctx)
+	ctx = b.withJournal(ctx, fsrc) // CloudWire patch (see docs/adr/0014)
 
 	err := sync.CopyDir(ctx, fdst, fsrc, b.opt.CreateEmptySrcDirs)
 	prettyprint(b.queueOpt.logger, "b.queueOpt.logger", fs.LogLevelDebug)

@@ -12,6 +12,12 @@ extension CoreClient {
         _ = try await call("core.shutdown", as: EmptyResult.self, timeout: .seconds(30))
     }
 
+    /// Stops the Core so the App can start its own `version`, unless a sync or a Studio Mode app runs.
+    public func restartForUpdate(version: String) async throws -> UpdateRestart {
+        try await call("core.restartForUpdate", params: JSONValue.object(["version": .string(version)]),
+                       timeout: .seconds(10))
+    }
+
     // MARK: settings
 
     public func settings() async throws -> CoreSettings {

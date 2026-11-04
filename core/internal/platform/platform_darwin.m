@@ -41,6 +41,27 @@ int cwMoveToTrash(const char *path, char **err) {
 	}
 }
 
+// cwBundleIdentifier returns a malloc'ed copy of the bundle's identifier or NULL.
+char *cwBundleIdentifier(const char *path) {
+	CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), true);
+	if (url == NULL) return NULL;
+	CFBundleRef bundle = CFBundleCreate(NULL, url);
+	CFRelease(url);
+	if (bundle == NULL) return NULL;
+	char *out = NULL;
+	CFStringRef ident = CFBundleGetIdentifier(bundle);
+	if (ident != NULL) {
+		CFIndex n = CFStringGetMaximumSizeForEncoding(CFStringGetLength(ident), kCFStringEncodingUTF8) + 1;
+		out = malloc((size_t)n);
+		if (out != NULL && !CFStringGetCString(ident, out, n, kCFStringEncodingUTF8)) {
+			free(out);
+			out = NULL;
+		}
+	}
+	CFRelease(bundle);
+	return out;
+}
+
 static nw_path_monitor_t cwMonitor;
 
 void cwStartNetworkMonitor(void) {
@@ -64,6 +85,7 @@ static void cwPowerCallback(void *refcon, io_service_t service, natural_t messag
 		IOAllowPowerChange(cwRootPort, (long)messageArgument);
 		break;
 	case kIOMessageSystemWillSleep:
+		// Held back until running syncs stopped cleanly (platform.MaxSleepDelay).
 		goSystemWillSleep();
 		IOAllowPowerChange(cwRootPort, (long)messageArgument);
 		break;

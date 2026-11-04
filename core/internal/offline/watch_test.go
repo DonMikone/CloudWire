@@ -3,17 +3,23 @@ package offline
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/fsnotify/fsevents"
 
 	"github.com/DonMikone/CloudWire/core/internal/sharing/nextcloud"
 	"github.com/DonMikone/CloudWire/core/internal/store"
+	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
 
 // etagDAV answers PROPFIND Depth 0 and 1 from a map of OCS path -> ETag
@@ -213,5 +219,120 @@ func TestItemETagFolderItemAndErrors(t *testing.T) {
 	dav.mu.Unlock()
 	if _, err := itemETag(ctx, c, "/Musik", store.OfflineItem{Kind: "files", Files: []string{"a.wav"}}); err == nil {
 		t.Fatal("server error must be reported, not digested")
+	}
+}
+
+func (h *harness) jobStopped(j *fakeJob) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.stopped
+}
+
+func TestDeletionWaitsForQuietPeriod(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	quiet := time.Duration(h.e.settings().QuietPeriodSeconds) * time.Second
+	t0 := h.now
+	h.e.localChange("a", "Tree/C/deleted.wav", t0)
+	if rt := h.e.rt["a"]; !rt.quietUntil.Equal(t0.Add(quiet)) || !rt.due.Equal(t0.Add(quiet)) {
+		t.Fatalf("due %v quiet until %v", rt.due, rt.quietUntil)
+	}
+	h.step()
+	h.now = t0.Add(quiet - time.Second)
+	h.step()
+	if n := len(h.started()); n != 0 {
+		t.Fatalf("deletion started %d runs before the Quiet Period ended", n)
+	}
+	h.now = t0.Add(quiet)
+	h.step()
+	if n := len(h.started()); n != 1 {
+		t.Fatalf("%d runs after the Quiet Period, want 1", n)
+	}
+}
+
+func TestOwnWritesAreIgnored(t *testing.T) {
+	h := newHarness(t)
+	it := h.addItem("a")
+	for _, rel := range []string{"Mix.wav.x1Y2ab3c.partial", "Sub/Song.Konflikt 2026-09-27 1713.wav"} {
+		h.e.localChange("a", rel, h.now)
+		if rt := h.e.rt["a"]; !rt.due.IsZero() || !rt.quietUntil.IsZero() || rt.pendingPaths[filepath.Join(it.StoragePath, rel)] {
+			t.Fatalf("%s scheduled a run: due %v", rel, rt.due)
+		}
+	}
+}
+
+// Logic-like churn during a run: an autosave file created and deleted every
+// few seconds, plus the run's own downloads, .partial renames and Conflict
+// Copies. The run is never stopped; one follow-up run waits for quiet.
+func TestChurnDuringRunQueuesOneFollowUp(t *testing.T) {
+	h := newHarness(t)
+	it := h.addItem("a")
+	quiet := time.Duration(h.e.settings().QuietPeriodSeconds) * time.Second
+	j := h.startRun("a")
+	h.e.onLog(h.e.cur, sv.LogLine{Level: "info", Msg: "Copied (new)", Object: "Mix.wav"}, "Konflikt")
+	h.e.onLog(h.e.cur, sv.LogLine{Level: "info", Msg: "Deleted", Object: "Old.wav"}, "Konflikt")
+	for _, rel := range []string{"Mix.wav.x1Y2ab3c.partial", "Mix.wav", "Old.wav", "Song.Konflikt 2026-09-27 1713.wav"} {
+		h.e.localChange("a", rel, h.now)
+	}
+	for i := range 20 {
+		h.now = h.now.Add(3 * time.Second)
+		h.e.localChange("a", "Project/Autosave/Project.autosave", h.now) // created or deleted
+		if i == 10 {
+			h.e.localChange("a", "Project/Bass.wav", h.now) // the user records a take
+		}
+		h.step()
+	}
+	h.e.mu.Lock()
+	stopping, queued := h.e.cur.stopping, len(h.e.queue)
+	h.e.mu.Unlock()
+	if stopping || h.jobStopped(j) || queued != 0 {
+		t.Fatalf("run disturbed: stopping=%v stopped=%v queued=%d", stopping, h.jobStopped(j), queued)
+	}
+
+	finished := h.now
+	j.complete(sv.StatusOK, "")
+	h.waitIdle()
+	rt := h.e.rt["a"]
+	want := map[string]bool{filepath.Join(it.StoragePath, "Project/Autosave/Project.autosave"): true,
+		filepath.Join(it.StoragePath, "Project/Bass.wav"): true}
+	if !maps.Equal(rt.pendingPaths, want) {
+		t.Fatalf("pending %v, want %v", rt.pendingPaths, want)
+	}
+	// Churn goes on after the run: the follow-up waits for quiet.
+	h.now = finished.Add(quiet / 2)
+	h.e.localChange("a", "Project/Autosave/Project.autosave", h.now)
+	last := h.now
+	h.step()
+	h.now = last.Add(quiet - time.Second)
+	h.step()
+	if n := len(h.started()); n != 1 {
+		t.Fatalf("%d runs before the Quiet Period after the last change ended, want 1", n)
+	}
+	h.now = last.Add(quiet)
+	h.step()
+	h.step()
+	if n := len(h.started()); n != 2 {
+		t.Fatalf("%d runs, want exactly one follow-up", n)
+	}
+}
+
+func TestLocalEventsHonourQuietPeriod(t *testing.T) {
+	h := newHarness(t)
+	it := h.addItem("a")
+	quiet := time.Duration(h.e.settings().QuietPeriodSeconds) * time.Second
+	w := &watcher{root: it.StoragePath, done: make(chan struct{})}
+	h.e.mu.Lock()
+	h.e.rt["a"].watch = w
+	h.e.mu.Unlock()
+	for _, ev := range []fsevents.Event{
+		{Path: filepath.Join(it.StoragePath, "Take.wav"), Flags: fsevents.ItemRemoved | fsevents.ItemIsFile},
+		{Path: filepath.Join(it.StoragePath, "Take.wav"), Flags: fsevents.ItemRenamed | fsevents.ItemIsFile},
+		{Path: it.StoragePath, Flags: fsevents.MustScanSubDirs},
+	} {
+		h.e.rt["a"].due, h.e.rt["a"].quietUntil = time.Time{}, time.Time{}
+		h.e.onLocalEvent("a", w, ev)
+		if rt := h.e.rt["a"]; !rt.due.Equal(h.now.Add(quiet)) {
+			t.Fatalf("event %v: due %v, want after the Quiet Period", ev.Flags, rt.due)
+		}
 	}
 }

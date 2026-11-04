@@ -41,6 +41,13 @@ func (b *bisyncRun) setResyncDefaults() {
 // copy any unique files to the opposite path,
 // and resolve any differing files according to the --resync-mode.
 func (b *bisyncRun) resync(fctx context.Context) (err error) {
+	// CloudWire patch (see docs/adr/0014): decide per file before anything is
+	// copied; this lists both sides (and writes the -new listings, which the
+	// blank lists below replace).
+	if err = b.planResync(b.octx, fctx); err != nil {
+		return err
+	}
+
 	fs.Infof(nil, "Copying Path2 files to Path1")
 
 	// Save blank filelists (will be filled from sync results)
@@ -172,6 +179,7 @@ func (b *bisyncRun) resync(fctx context.Context) (err error) {
 		_ = os.Remove(b.newListing1)
 		_ = os.Remove(b.newListing2)
 	}
+	b.seedJournal() // CloudWire patch (see docs/adr/0014)
 	return nil
 }
 
@@ -186,6 +194,12 @@ func (b *bisyncRun) resync(fctx context.Context) (err error) {
 */
 func (b *bisyncRun) setResyncConfig(ctx context.Context) context.Context {
 	ci := fs.GetConfig(ctx)
+	if b.journal != nil {
+		// CloudWire patch (see docs/adr/0014): planResync and resyncEqualFn
+		// decide which files may be replaced; nothing is skipped wholesale.
+		ci.IgnoreExisting = false
+		return ctx
+	}
 	switch b.opt.ResyncMode {
 	case PreferPath1:
 		if !b.resyncIs1to2 { // 2to1 (remember 2to1 is first)

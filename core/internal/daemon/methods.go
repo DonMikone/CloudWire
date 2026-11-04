@@ -52,6 +52,22 @@ func (c *Core) registerMethods() {
 		c.requestShutdown()
 		return empty(), nil
 	}))
+	// The App restarts the Core into its own version after an update, but
+	// never during a sync or while a Studio Mode app runs: until then the
+	// previous version keeps running and the App shows the update as pending.
+	h("core.restartForUpdate", api.Bind(func(_ context.Context, p struct {
+		Version string `json:"version"`
+	}) (any, error) {
+		if reason, held := c.offline.HoldForRestart(); held {
+			if !c.updateDeferred.Swap(true) {
+				c.log.Info("core", "", msg.New("core.updateDeferred", "version", p.Version).Because(reason), nil)
+			}
+			return map[string]any{"restarting": false, "reason": reason}, nil
+		}
+		c.log.Info("core", "", msg.New("core.restartingForUpdate", "version", p.Version), nil)
+		c.requestShutdown()
+		return map[string]any{"restarting": true, "reason": nil}, nil
+	}))
 
 	// settings
 	h("settings.get", api.NoParams(func(context.Context) (any, error) { return c.st.Settings() }))

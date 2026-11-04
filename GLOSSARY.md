@@ -15,10 +15,13 @@ Which cloud paths an Offline Item covers; an anchored filter list, not a file in
 rclone-bisync's per-side inventory of both synced paths; a lost or invalid listing pair suspends the item's normal bisync until recover or resync (docs/adr/0012).
 
 **Resync** (code: `resync: true` in bisync, `NeedsResync` on an item):
-Rebuild of the listing pair from a full union copy of both sides; never deletes, decides per-file winners (docs/adr/0003).
+Rebuild of the listing pair from a full union copy of both sides; never deletes, and keeps the local version of a file present on both sides unless a Cloud Change is proven (docs/adr/0003, docs/adr/0014).
+
+**Cloud Change**:
+A change to a cloud file or folder made by anything other than the Offline Item itself; CloudWire's own uploads, deletes and failed transfers are never a Cloud Change (docs/adr/0014). _Avoid_: remote change, cloud-side modification.
 
 **Conflict Copy** (UI: Konfliktkopie; code: `ConflictSuffix`/`ConflictMarker`):
-The losing version of a bisync conflict, saved beside the file under a distinct name and label; never counts toward the Mass-Delete Guard.
+The cloud version of a file that changed locally and by a Cloud Change since the last sync, saved beside the file under a distinct name and label; never counts toward the Mass-Delete Guard.
 
 **Offline-Sync** (code: `offline` packages, `supervisor`):
 The background engine around the Offline Items: scheduling, triggers, bisync runs, retry backoff (docs/adr/0012).

@@ -41,7 +41,8 @@ type PauseRulesSettings struct {
 	CPU            CPUSettings        `json:"cpu"`
 }
 
-// StudioModeSettings lists the app bundles that pause syncing.
+// StudioModeSettings lists the app bundles that pause syncing. A new
+// installation turns it on when it finds a DAW (daemon first start).
 type StudioModeSettings struct {
 	Enabled bool     `json:"enabled"`
 	Apps    []string `json:"apps"`
@@ -100,7 +101,7 @@ func DefaultSettings() Settings {
 		GenericCheckSeconds:   300,
 		SafetyFullSyncMinutes: 60,
 		PauseRules: PauseRulesSettings{
-			StudioMode:     StudioModeSettings{Enabled: true, Apps: []string{}},
+			StudioMode:     StudioModeSettings{Enabled: false, Apps: []string{}},
 			Battery:        ToggleSettings{Enabled: true},
 			MeteredNetwork: ToggleSettings{Enabled: true},
 			CPU:            CPUSettings{Enabled: true, ThresholdPercent: 70, WindowSeconds: 30},
@@ -109,7 +110,10 @@ func DefaultSettings() Settings {
 		DefaultCacheMaxGB: 20,
 		DefaultMountType:  "nfsmount",
 		DefaultExcludes: []string{".DS_Store", "._*", ".Spotlight-V100/**", ".Trashes/**", ".fseventsd/**",
-			".TemporaryItems/**", ".DocumentRevisions-V100/**"},
+			".TemporaryItems/**", ".DocumentRevisions-V100/**",
+			// DAW autosaves churn every minute while a project is open (docs/adr/0014);
+			// backup folders such as Cubase's "Project File Backups" stay synced.
+			"*.logicx/Alternatives/*/Autosave/**", "*.band/Alternatives/*/Autosave/**", "Auto Saves/**"},
 		Notifications: NotificationSettings{Errors: true, Conflicts: true, MassDelete: true, LinkCopied: true},
 		Log:           LogSettings{Level: "info", RetentionDays: 30, MaxMB: 50},
 		Updates:       UpdateSettings{Check: true},

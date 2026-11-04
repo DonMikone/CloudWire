@@ -90,6 +90,19 @@ func RunningExecutables() ([]string, error) {
 	return out, nil
 }
 
+// BundleIdentifier returns the CFBundleIdentifier of the bundle at path ("" if
+// path is no bundle or has none).
+func BundleIdentifier(path string) string {
+	cs := C.CString(path)
+	defer C.free(unsafe.Pointer(cs))
+	id := C.cwBundleIdentifier(cs)
+	if id == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(id))
+	return C.GoString(id)
+}
+
 // OnBattery reports whether the Mac currently draws from its battery.
 func OnBattery() bool { return C.cwOnBattery() == 1 }
 
@@ -219,6 +232,10 @@ func goNetworkChanged(satisfied, expensive, constrained C.int) {
 
 // ---- Sleep / wake ----
 
+// MaxSleepDelay is how long willSleep may hold back the system sleep. macOS
+// waits up to 30 s for the acknowledgement of kIOMessageSystemWillSleep.
+const MaxSleepDelay = 25 * time.Second
+
 var (
 	powerMu     sync.Mutex
 	willSleepFn func()
@@ -226,8 +243,8 @@ var (
 	powerOnce   sync.Once
 )
 
-// OnPowerEvents registers sleep/wake callbacks. willSleep gets at most 5 s
-// before the system is allowed to sleep.
+// OnPowerEvents registers sleep/wake callbacks. The system sleeps when
+// willSleep returned, at the latest after MaxSleepDelay.
 func OnPowerEvents(willSleep, didWake func()) error {
 	powerMu.Lock()
 	willSleepFn, didWakeFn = willSleep, didWake
@@ -241,6 +258,8 @@ func OnPowerEvents(willSleep, didWake func()) error {
 	return err
 }
 
+// goSystemWillSleep runs before IOAllowPowerChange acknowledges the sleep.
+//
 //export goSystemWillSleep
 func goSystemWillSleep() {
 	powerMu.Lock()
@@ -256,7 +275,7 @@ func goSystemWillSleep() {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(MaxSleepDelay):
 	}
 }
 

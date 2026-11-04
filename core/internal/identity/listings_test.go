@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DonMikone/CloudWire/core/internal/selection"
 	sv "github.com/DonMikone/CloudWire/core/internal/supervisor"
 )
 
@@ -71,6 +72,30 @@ func TestRewriteListingsRejectsUnknownFormat(t *testing.T) {
 	}
 	if !strings.Contains(readString(t, p), `"Tree/B/x.wav"`) {
 		t.Fatal("listing of unknown format changed")
+	}
+}
+
+func TestForgetExcludedDropsOnlyExcludedEntries(t *testing.T) {
+	dir := t.TempDir()
+	sample := `# bisync listing v1 from 2026-09-27T15:13:03.000000000+0000
+d        0 - - 2026-09-27T15:13:03.000000000+0000 "Song.logicx/Alternatives/000/Autosave"
+-       12 - - 2026-09-27T15:13:03.000000000+0000 "Song.logicx/Alternatives/000/Autosave/2026-11-02 12:14:48Z.songData"
+-        7 - - 2026-09-27T15:13:03.000000000+0000 "Song.logicx/Alternatives/000/ProjectData"
+-        9 - - 2026-09-27T15:13:03.000000000+0000 "Song.logicx/Alternatives/000/Project File Backups/00.cst"
+`
+	files := []string{writeListing(t, dir, "s.path1.lst", sample), writeListing(t, dir, "s.path2.lst-old", sample)}
+	excludes := []string{"*.logicx/Alternatives/*/Autosave/**"}
+	if err := ForgetExcluded(dir, func(p string) bool { return selection.Excluded(p, excludes) }); err != nil {
+		t.Fatal(err)
+	}
+	want := `# bisync listing v1 from 2026-09-27T15:13:03.000000000+0000
+-        7 - - 2026-09-27T15:13:03.000000000+0000 "Song.logicx/Alternatives/000/ProjectData"
+-        9 - - 2026-09-27T15:13:03.000000000+0000 "Song.logicx/Alternatives/000/Project File Backups/00.cst"
+`
+	for _, f := range files {
+		if got := readString(t, f); got != want {
+			t.Fatalf("%s:\n%s\nwant\n%s", filepath.Base(f), got, want)
+		}
 	}
 }
 

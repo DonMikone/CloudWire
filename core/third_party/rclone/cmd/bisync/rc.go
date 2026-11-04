@@ -144,6 +144,14 @@ func rcBisync(ctx context.Context, in rc.Params) (out rc.Params, err error) {
 	if err = setEnum(in, "listingCache", opt.ListingCache.String(), opt.ListingCache.Set); err != nil {
 		return nil, err
 	}
+	// CloudWire patch (see docs/adr/0014): journal and settle time.
+	if opt.Journal, err = in.GetBool("journal"); rc.NotErrParamNotFound(err) {
+		fs.Debugf("journal", "optional parameter is missing. using default value: %v", opt.Journal)
+	}
+	if opt.SettleTime, err = in.GetFsDuration("settleTime"); rc.NotErrParamNotFound(err) {
+		opt.SettleTime = 0
+		fs.Debugf("settleTime", "optional parameter is missing. using default value: %v", opt.SettleTime)
+	}
 	if opt.ConflictSuffixFlag, err = in.GetString("conflictSuffix"); rc.NotErrParamNotFound(err) {
 		fs.Debugf("conflictSuffix", "optional parameter is missing. using default value: %v", opt.ConflictSuffixFlag)
 	}

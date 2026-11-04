@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rclone/rclone/cmd/bisync"
 	"github.com/rclone/rclone/fs/config/obscure"
 
 	"github.com/DonMikone/CloudWire/core/internal/activity"
@@ -58,9 +59,20 @@ func (f fakeVaults) IsLocked(id string) bool { return f[id] }
 type fakeProbes struct {
 	mu      sync.Mutex
 	battery bool
+	exes    []string
 }
 
-func (f *fakeProbes) RunningExecutables() ([]string, error) { return nil, nil }
+func (f *fakeProbes) RunningExecutables() ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.exes, nil
+}
+func (f *fakeProbes) setExes(exes ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.exes = exes
+}
+func (f *fakeProbes) BundleID(string) string { return "" }
 func (f *fakeProbes) OnBattery() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -82,6 +94,8 @@ type fakeJob struct {
 	mu      sync.Mutex
 	out     sv.Msg
 	stopped bool
+	grace   time.Duration
+	stopOut sv.Msg // outcome after Stop; zero = "stopped"
 	sent    []sv.Command
 }
 
@@ -91,10 +105,13 @@ func (j *fakeJob) Outcome() sv.Msg {
 	defer j.mu.Unlock()
 	return j.out
 }
-func (j *fakeJob) Stop(time.Duration) {
+func (j *fakeJob) Stop(grace time.Duration) {
 	j.mu.Lock()
-	j.stopped = true
+	j.stopped, j.grace = true, grace
 	j.out = sv.Msg{Type: "result", Status: sv.StatusStopped}
+	if j.stopOut.Status != "" {
+		j.out = j.stopOut
+	}
 	j.mu.Unlock()
 	j.finish()
 }
@@ -211,10 +228,10 @@ func TestQuietPeriodRestartsOnEachChange(t *testing.T) {
 	h := newHarness(t)
 	h.addItem("a")
 	t0 := h.now
-	h.e.localChange("a", "Song.wav", 0, false, t0)
+	h.e.localChange("a", "Song.wav", t0)
 	h.step()
 	h.now = t0.Add(30 * time.Second)
-	h.e.localChange("a", "Song.wav", 0, false, h.now)
+	h.e.localChange("a", "Song.wav", h.now)
 	h.now = t0.Add(60 * time.Second)
 	h.step()
 	if n := len(h.started()); n != 0 {
@@ -232,7 +249,7 @@ func TestQuietPeriodRestartsOnEachChange(t *testing.T) {
 		t.Fatalf("expected one background bisync job for a at t0+90s, got %+v", jobs)
 	}
 	// Excluded names never trigger a sync.
-	h.e.localChange("a", ".DS_Store", 0, false, h.now)
+	h.e.localChange("a", ".DS_Store", h.now)
 	if h.e.rt["a"].pendingPaths[filepath.Join(h.dir, "store", "a", ".DS_Store")] {
 		t.Fatal("excluded change recorded")
 	}
@@ -365,8 +382,8 @@ func TestMassDeleteConfirmFlow(t *testing.T) {
 	jobs = h.started()
 	params = nil
 	_ = json.Unmarshal(jobs[2].job.Bisync, &params)
-	if params["force"] != nil || params["resync"] != true || params["resyncMode"] != "newer" {
-		t.Fatalf("restore must resync (newer) without force: %v", params)
+	if params["force"] != nil || params["resync"] != true || params["journal"] != true {
+		t.Fatalf("restore must resync through the journal without force: %v", params)
 	}
 }
 
@@ -393,8 +410,8 @@ func TestLostListingsResyncs(t *testing.T) {
 	}
 	var params map[string]any
 	_ = json.Unmarshal(jobs[1].job.Bisync, &params)
-	if params["resync"] != true || params["resyncMode"] != "newer" {
-		t.Fatalf("recovery must resync (newer): %v", params)
+	if params["resync"] != true || params["journal"] != true {
+		t.Fatalf("recovery must resync through the journal: %v", params)
 	}
 	// A failing resync takes the normal error path (with retry backoff): no
 	// resync loop. NeedsResync stays set, so the next attempt resyncs again,
@@ -411,6 +428,46 @@ func TestLostListingsResyncs(t *testing.T) {
 	// First consecutive failure: 1-minute backoff instead of the fixed 5.
 	if got := h.e.rt["a"].retryAt; !got.Equal(h.now.Add(h.e.backoff(1))) {
 		t.Fatalf("retryAt %v", got)
+	}
+}
+
+// A run that left files for later (still being written, or a transfer
+// failed) succeeds and schedules the next run after the Quiet Period.
+func TestLeftForLaterRunSchedulesFollowUp(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	h.e.rt["a"].due = h.now
+	h.step()
+	h.started()[0].h.OnLog(sv.LogLine{Level: "notice", Msg: "1 " + bisync.LeftForLaterRun})
+	h.started()[0].complete(sv.StatusOK, "")
+	h.waitIdle()
+	if it := h.state("a"); it.State != StateIdle || it.LastError != "" {
+		t.Fatalf("item after a run with files left for later: %+v", it)
+	}
+	quiet := time.Duration(h.e.settings().QuietPeriodSeconds) * time.Second
+	h.e.mu.Lock()
+	due := h.e.rt["a"].due
+	h.e.mu.Unlock()
+	if due.IsZero() || due.After(h.now.Add(quiet)) {
+		t.Fatalf("follow-up due %v, want by %v", due, h.now.Add(quiet))
+	}
+}
+
+// Files that could not be transferred leave consistent listings, but the
+// run is a failure the user sees, retried with backoff.
+func TestFailedTransfersFailTheRun(t *testing.T) {
+	h := newHarness(t)
+	h.addItem("a")
+	h.e.rt["a"].due = h.now
+	h.step()
+	h.started()[0].h.OnLog(sv.LogLine{Level: "notice", Msg: bisync.TransfersFailed + ": quota exceeded"})
+	h.started()[0].complete(sv.StatusOK, "")
+	h.waitIdle()
+	if it := h.state("a"); it.State != StateError || !strings.Contains(it.LastError, "quota exceeded") {
+		t.Fatalf("item after failed transfers: %+v", it)
+	}
+	if got := h.e.rt["a"].retryAt; !got.Equal(h.now.Add(h.e.backoff(1))) {
+		t.Fatalf("retry at %v, want backoff", got)
 	}
 }
 
@@ -704,7 +761,7 @@ func TestCreateRejectsLockedVault(t *testing.T) {
 func TestConflictStatusForPaths(t *testing.T) {
 	h := newHarness(t)
 	a := h.addItem("a")
-	h.e.localChange("a", "Sub/Changed.wav", 0, false, h.now)
+	h.e.localChange("a", "Sub/Changed.wav", h.now)
 	got, err := h.e.StatusForPaths([]string{
 		filepath.Join(a.StoragePath, "Bassline.Konflikt 2026-09-23 1405.wav"),
 		filepath.Join(a.StoragePath, "Sub/Changed.wav"),
@@ -914,6 +971,14 @@ func TestRunRenewsFiltersHashAfterRuleUpdate(t *testing.T) {
 		}
 		_ = os.WriteFile(f, []byte(old), 0o600)
 		_ = os.WriteFile(f+".md5", []byte(hex.EncodeToString(oldSum[:])), 0o600)
+		// The listing of the old rules still holds a path the new excludes skip.
+		workdir := paths.ForHome(h.dir).BisyncWorkdir("t")
+		listing := filepath.Join(workdir, "s.path1.lst")
+		const header = "# bisync listing v1 from 2026-11-02T12:00:00.000000000+0000\n"
+		const kept = `-        7 - - 2026-11-02T12:00:00.000000000+0000 "` + "\u00dcbung/Song.logicx/Alternatives/000/ProjectData" + "\"\n"
+		const autosave = `-        7 - - 2026-11-02T12:00:00.000000000+0000 "` + "\u00dcbung/Song.logicx/Alternatives/000/Autosave/a.songData" + "\"\n"
+		_ = os.MkdirAll(workdir, 0o700)
+		_ = os.WriteFile(listing, []byte(header+kept+autosave), 0o600)
 		h.e.mu.Lock()
 		h.e.rt["t"].due = h.now
 		h.e.mu.Unlock()
@@ -930,6 +995,13 @@ func TestRunRenewsFiltersHashAfterRuleUpdate(t *testing.T) {
 		}
 		if string(sum) != want {
 			t.Fatalf("needsResync=%v: hash %s, want %s", needsResync, sum, want)
+		}
+		wantListing := header + kept
+		if needsResync {
+			wantListing += autosave // the resync rebuilds the listings
+		}
+		if b, _ := os.ReadFile(listing); string(b) != wantListing {
+			t.Fatalf("needsResync=%v: listing %q", needsResync, b)
 		}
 	}
 }
@@ -1066,9 +1138,9 @@ func TestLocalAdditionsJoinTheSelection(t *testing.T) {
 	writeFiles(t, inner.StoragePath, "song.wav")
 
 	// The watcher starts a run for a new child of a partial folder only.
-	h.e.localChange("t", "T/New/n", 0, false, h.now)
-	h.e.localChange("t", "T/~$Doc.docx", 0, false, h.now)
-	h.e.localChange("t", "in/song.wav", 0, false, h.now)
+	h.e.localChange("t", "T/New/n", h.now)
+	h.e.localChange("t", "T/~$Doc.docx", h.now)
+	h.e.localChange("t", "in/song.wav", h.now)
 	pending := h.e.rt["t"].pendingPaths
 	if !pending[filepath.Join(it.StoragePath, "T/New/n")] || len(pending) != 1 {
 		t.Fatalf("pending %v", pending)
@@ -1149,7 +1221,7 @@ func TestStatusForNestedStorage(t *testing.T) {
 	if err := h.st.InsertOfflineItem(outer); err != nil {
 		t.Fatal(err)
 	}
-	h.e.localChange("in", "Song.wav", 0, false, h.now)
+	h.e.localChange("in", "Song.wav", h.now)
 	song, other, loose := filepath.Join(inner.StoragePath, "Song.wav"), filepath.Join(outer.StoragePath, "other/x.wav"),
 		filepath.Join(outer.StoragePath, "loose.txt")
 	got, err := h.e.StatusForPaths([]string{song, other, loose})

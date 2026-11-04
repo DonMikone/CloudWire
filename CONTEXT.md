@@ -43,7 +43,7 @@ A condition that suspends Offline Item syncing; Studio Mode pauses while chosen 
 The time without local changes an Offline Item waits before syncing.
 
 **Conflict Copy** (UI: Konfliktkopie):
-The cloud version saved beside a file that changed locally and in the cloud since the last sync.
+The cloud version saved beside a file that changed locally and, by someone other than this Offline Item, in the cloud since the last sync.
 
 **Mass-Delete Guard** (UI: Massenlöschschutz):
 The stop that requires confirmation when a sync would delete more than half of an Offline Item.

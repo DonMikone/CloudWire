@@ -130,7 +130,7 @@ func (pr *pair) sync(force bool) error {
 	logMu.Lock()
 	logLines = nil
 	logMu.Unlock()
-	_, err := rcl.Call("sync/bisync", BisyncParams(pr.item, "loc", pr.p, "Konflikt", force, ListingCacheUse))
+	_, err := rcl.Call("sync/bisync", BisyncParams(pr.item, "loc", pr.p, "Konflikt", force, ListingCacheUse, 0))
 	if err == nil {
 		pr.item.NeedsResync = false
 	}

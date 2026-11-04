@@ -84,6 +84,15 @@ struct OverviewView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if let pending = model.pendingCoreUpdate {
+                    StatusLabel(text: String(localized: "Update pending"), color: .orange)
+                    Text("The background service switches to version \(CoreLauncher.appVersion) when no sync is running and no Studio Mode app is open.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(pending.localized())
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text("\(model.remoteConnections.count) connections")
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -69,11 +69,37 @@ sync.
    Upstream issue: https://github.com/rclone/rclone/issues/XXXX
    (filed by CloudWire; number recorded when the fork is published).
 
-All patches carry a `// CloudWire patch (see docs/adr/0012):` comment
-marker so an upstream upgrade can reapply them mechanically.
+6. **`cmd/bisync/journal.go`, `cmd/bisync/{cmd,rc,operations,deltas,resolve,resync,queue,march,listcache}.go`,
+   `fs/operations/transferdone.go`, `fs/sync/sync.go`, `backend/webdav/webdav.go` —
+   transfer journal, settle time and local Trash (rc parameters `journal`,
+   `settleTime`).** A per-file journal (`*.jnl` in the workdir) records,
+   as each copy completes (new `operations.TransferDoneFn`, called by
+   sync after a successful `Copy`), the state both sides had when bisync
+   last brought them in line, including the webdav file ETag (now kept on
+   `webdav.Object` and collected by the march; never written to the
+   listing files, whose id column must stay `-`), and the expected
+   cloud state of every upload before it starts. A Path2 delta the journal
+   explains as bisync's own work is dropped and the Path1 version wins; a
+   Path2 deletion counts only for a file the journal saw in the cloud and
+   only after a fresh `NewObject` confirms it. A resync decides each file
+   present on both sides through the journal instead of `--resync-mode`.
+   Per-file transfer errors no longer abort the run critically: the files
+   are rolled back and the run logs `TransfersFailed`; Path1 files
+   changed within the settle time are left for a later run (`LeftForLaterRun`); Path1 files a
+   sync replaces or deletes are moved aside (`--backup-dir` in the
+   workdir) and handed to `LocalTrash` once the transfer succeeded, or put
+   back if it did not. A graceful stop cancels transfers at once. A journal
+   run works on its own copy of the config (`fs.AddConfig`) so the
+   backup dir never leaks into another run in the same process. Off by
+   default (upstream behaviour). Rationale:
+   `docs/adr/0014-local-wins-without-proven-cloud-change.md`.
+
+All patches carry a `// CloudWire patch (see docs/adr/00NN)` comment
+marker so an upstream upgrade can find and reapply them (`grep -rn
+"CloudWire patch"`).
 
 ## Upgrading
 
 Replace the tree with the new upstream release, reapply the patches
-(marked with `// CloudWire patch (see docs/adr/0012):`), update this
-README, and keep the `replace` directive in `core/go.mod` pointing here.
+(marked with `// CloudWire patch`), update this README, and keep the
+`replace` directive in `core/go.mod` pointing here.

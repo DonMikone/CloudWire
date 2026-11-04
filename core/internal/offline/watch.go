@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -126,12 +125,20 @@ func (e *Engine) onLocalEvent(id string, w *watcher, ev fsevents.Event) {
 	if !current {
 		return
 	}
-	if ev.Flags&(fsevents.MustScanSubDirs|fsevents.RootChanged) != 0 {
-		if ev.Flags&fsevents.RootChanged != 0 {
-			e.followRoot(id)
-		}
+	if ev.Flags&fsevents.RootChanged != 0 {
+		e.followRoot(id)
 		e.mu.Lock()
 		rt.due = minTime(rt.due, e.Now())
+		e.mu.Unlock()
+		e.poke()
+		return
+	}
+	if ev.Flags&fsevents.MustScanSubDirs != 0 {
+		// Events were dropped: some change below, so wait for quiet as usual.
+		now := e.Now()
+		e.mu.Lock()
+		rt.quietUntil = now.Add(time.Duration(e.settings().QuietPeriodSeconds) * time.Second)
+		rt.due = minTime(rt.due, rt.quietUntil)
 		e.mu.Unlock()
 		e.poke()
 		return
@@ -143,17 +150,17 @@ func (e *Engine) onLocalEvent(id string, w *watcher, ev fsevents.Event) {
 	if p == w.root || !strings.HasPrefix(p, w.root+"/") {
 		return
 	}
-	_, err := os.Lstat(p)
-	gone := ev.Flags&(fsevents.ItemRenamed|fsevents.ItemRemoved) != 0 && errors.Is(err, os.ErrNotExist)
-	e.localChange(id, strings.TrimPrefix(p, w.root+"/"), ev.Flags, gone, e.Now())
+	e.localChange(id, strings.TrimPrefix(p, w.root+"/"), e.Now())
 }
 
-// localChange records a local modification of rel (relative to the Storage
-// Location) at now: it restarts the Quiet Period and marks the path pending.
-// A synced path that was renamed or deleted (gone) skips the Quiet Period and
-// interrupts a run of the item (ADR 0011): the next run applies the rename
-// before bisync could take it for a deletion.
-func (e *Engine) localChange(id, rel string, flags fsevents.EventFlags, gone bool, now time.Time) {
+// localChange records a local modification, rename or deletion of rel
+// (relative to the Storage Location) at now: it restarts the Quiet Period and
+// marks the path pending (ADR 0014: deletions wait for quiet like any change).
+// During a run of the item the path is only noted; a change the run did not
+// make itself queues a follow-up run when it ends, never an interrupt.
+// CloudWire's own writes are ignored: rclone's `.partial` downloads (via
+// selection.Excluded) and the Conflict Copies bisync creates.
+func (e *Engine) localChange(id, rel string, now time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	rt := e.rt[id]
@@ -161,24 +168,13 @@ func (e *Engine) localChange(id, rel string, flags fsevents.EventFlags, gone boo
 		return
 	}
 	it, err := e.st.OfflineItem(id)
-	if err != nil || rel == "" || selection.Excluded(rel, it.Excludes) {
+	if err != nil || rel == "" || selection.Excluded(rel, it.Excludes) || strings.Contains(path.Base(rel), ConflictMarker(e.label())) {
 		return
 	}
 	if !Includes(it, rel) && !e.adoptableLocked(it, rel) {
 		return
 	}
-	running := e.cur != nil && e.cur.q.itemID == id
-	if gone && e.vanishedLocked(rel, flags, running) {
-		if running {
-			e.interruptCurrentLocked()
-			return
-		}
-		rt.quietUntil = time.Time{}
-		rt.due = now
-		e.poke()
-		return
-	}
-	if running {
+	if e.cur != nil && e.cur.q.itemID == id {
 		rt.duringRun[rel] = true
 		return
 	}
@@ -187,20 +183,6 @@ func (e *Engine) localChange(id, rel string, flags fsevents.EventFlags, gone boo
 	rt.quietUntil = now.Add(quiet)
 	rt.due = minTime(rt.due, rt.quietUntil)
 	e.poke()
-}
-
-// vanishedLocked reports whether a gone path is the user's rename or deletion:
-// not a Conflict Copy bisync renamed, and not a file the running sync just
-// deleted itself (bisync logs its deletions before FSEvents reports them).
-// Folders removed outright are left to the next run.
-func (e *Engine) vanishedLocked(rel string, flags fsevents.EventFlags, running bool) bool {
-	if flags&fsevents.ItemRenamed != 0 {
-		return !strings.Contains(path.Base(rel), ConflictMarker(e.label()))
-	}
-	if flags&fsevents.ItemRemoved != 0 && flags&fsevents.ItemIsDir == 0 {
-		return !running || e.cur.files[rel] != "deleted"
-	}
-	return false
 }
 
 // adoptableLocked reports whether a local change outside a files item's

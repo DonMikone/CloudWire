@@ -156,6 +156,58 @@ VALUES ('of1','a','folder','Musik','/Users/mike/CloudWire/Musik','[]',1)`); err 
 	}
 }
 
+func TestDAWAutosaveExcludesMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cloudwire.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertConnection(Connection{ID: "a", Name: "Cloud", Kind: "remote", RcloneRemote: "cw-a", Provider: "webdav", CreatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// Items and a customised default list stored before migration 6; one item already has a pattern.
+	if _, err := s.DB().Exec(`UPDATE schema_version SET version = 5;
+INSERT INTO offline_items(id,connection_id,kind,remote_path,storage_path,excludes,created_at) VALUES
+  ('of1','a','folder','Musik','/m','[".DS_Store","Stems/**"]',1),
+  ('of2','a','folder','Cubase','/c','["Auto Saves/**"]',1),
+  ('of3','a','folder','Leer','/l','[]',1);
+INSERT INTO settings(key, value) VALUES ('defaultExcludes', '["._*","Bounces/**"]')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer s.Close()
+	daw := []string{"*.logicx/Alternatives/*/Autosave/**", "*.band/Alternatives/*/Autosave/**", "Auto Saves/**"}
+	check := func() {
+		t.Helper()
+		for id, want := range map[string][]string{
+			"of1": append([]string{".DS_Store", "Stems/**"}, daw...),
+			"of2": {"Auto Saves/**", daw[0], daw[1]},
+			"of3": daw,
+		} {
+			if it, err := s.OfflineItem(id); err != nil || !reflect.DeepEqual(it.Excludes, want) {
+				t.Fatalf("%s excludes %q %v, want %q", id, it.Excludes, err, want)
+			}
+		}
+		if st, _ := s.Settings(); !reflect.DeepEqual(st.DefaultExcludes, append([]string{"._*", "Bounces/**"}, daw...)) {
+			t.Fatalf("default excludes %q", st.DefaultExcludes)
+		}
+	}
+	check()
+	// Applying it again changes nothing.
+	if _, err := s.DB().Exec(migrations[5]); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	// A fresh install has no stored default list; the built-in one holds the patterns.
+	if st, _ := openTest(t).Settings(); !reflect.DeepEqual(st.DefaultExcludes[len(st.DefaultExcludes)-3:], daw) {
+		t.Fatalf("fresh default excludes %q", st.DefaultExcludes)
+	}
+}
+
 func TestForeignKeysEnforced(t *testing.T) {
 	s := openTest(t)
 	err := s.InsertMount(Mount{ID: "m", ConnectionID: "missing", MountPoint: "/x", VolumeName: "x", MountType: "nfsmount", CacheMaxGB: 1})
@@ -172,6 +224,17 @@ func TestSettingsDefaultsAndMergePatch(t *testing.T) {
 	}
 	if st.QuietPeriodSeconds != 60 || st.Bandwidth.DownloadMiBps != 20 || !st.PauseRules.CPU.Enabled || st.Log.Level != "info" {
 		t.Fatalf("defaults wrong: %+v", st)
+	}
+	if st.PauseRules.StudioMode.Enabled || st.PauseRules.StudioMode.Apps == nil {
+		t.Fatalf("Studio Mode must default to off with no apps (first start turns it on with a DAW): %+v", st.PauseRules.StudioMode)
+	}
+	// An existing installation stored its whole pauseRules row at first start;
+	// the changed default never turns its Studio Mode off.
+	if _, err := s.DB().Exec(`INSERT INTO settings(key, value) VALUES ('pauseRules', '{"studioMode":{"enabled":true,"apps":["/Applications/Logic Pro.app"]}}')`); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.Settings(); !st.PauseRules.StudioMode.Enabled || len(st.PauseRules.StudioMode.Apps) != 1 || !st.PauseRules.Battery.Enabled {
+		t.Fatalf("stored Studio Mode lost: %+v", st.PauseRules)
 	}
 	st, err = s.UpdateSettings(map[string]any{"pauseRules": map[string]any{"cpu": map[string]any{"thresholdPercent": 85}}})
 	if err != nil {

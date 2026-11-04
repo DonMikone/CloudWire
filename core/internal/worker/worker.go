@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rclone/rclone/cmd/bisync"
 	"github.com/rclone/rclone/fs"
 	fslog "github.com/rclone/rclone/fs/log"
 
@@ -299,6 +300,8 @@ func runBisync(job sv.Job, cmds <-chan sv.Command, out *emitter) int {
 		return 1
 	}
 	applyBwLimit(job.BwLimit)
+	// Local files a sync replaces or deletes go to the Trash (docs/adr/0014).
+	bisync.LocalTrash = platform.MoveToTrash
 	id := job.Identity
 	if id != nil {
 		next, ok := runRenames(id, cmds, out)
@@ -445,7 +448,8 @@ func IsMassDelete(errText string) bool {
 }
 
 // gracefulStop lets rclone's bisync shut down gracefully: it handles SIGINT
-// through lib/atexit (finish the current transfer, keep listings consistent).
+// through lib/atexit (cancel transfers in flight, keep the journal and the
+// listings consistent; docs/adr/0014).
 func gracefulStop() {
 	_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
 }

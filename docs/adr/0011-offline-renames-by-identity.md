@@ -5,3 +5,5 @@ Before every bisync run the worker compares the synced paths of an Offline Item 
 We need this because bisync alone cannot keep a rename: the anchored Selection filters (ADR 0010) hide the new name, so bisync sees only a deletion, and a resync is a union copy that brings the old name back. The cost is a coupling to bisync's listing format v1; integration tests pin it, and an unknown format falls back to a resync.
 
 Considered: rclone's `--track-renames`. Rejected because it is ignored during a resync, needs both names inside the filters and still counts renames toward `--max-delete`. Considered: a resync after every rename. Rejected because it copies everything again and resurrects deletions.
+
+Amendment (docs/adr/0014): a rename or deletion of a synced path during a run no longer stops the run; the next run applies it after the Quiet Period. Only a moved Storage Location still interrupts a run.

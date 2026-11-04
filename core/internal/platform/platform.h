@@ -6,5 +6,6 @@ int cwLowPowerMode(void);
 int cwMoveToTrash(const char *path, char **err);
 void cwStartNetworkMonitor(void);
 int cwStartPowerNotifications(void);
+char *cwBundleIdentifier(const char *path);
 
 #endif

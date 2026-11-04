@@ -248,6 +248,7 @@ type Object struct {
 	modTime     time.Time // modification time of the object
 	sha1        string    // SHA-1 of the object content if known
 	md5         string    // MD5 of the object content if known
+	etag        string    // ETag of the object if the server sent one (CloudWire patch, see docs/adr/0014)
 }
 
 // ------------------------------------------------------------
@@ -1442,6 +1443,7 @@ func (o *Object) setMetaData(info *api.Prop) (err error) {
 	o.hasMetaData = true
 	o.size = info.Size
 	o.modTime = time.Time(info.Modified)
+	o.etag = info.ETag
 	if o.fs.hasOCMD5 || o.fs.hasOCSHA1 || o.fs.hasMESHA1 {
 		hashes := info.Hashes()
 		if o.fs.hasOCSHA1 || o.fs.hasMESHA1 {
@@ -1657,6 +1659,13 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		if err != nil {
 			return fmt.Errorf("couldn't calculate checksum after upload: %w", err)
 		}
+		// CloudWire patch (see docs/adr/0014): storing the checksum may give
+		// the file a new ETag; bisync's journal must record the final one.
+		info, err := o.fs.readMetaDataForPath(ctx, o.remote)
+		if err != nil {
+			return err
+		}
+		o.etag = info.ETag
 	}
 	return nil
 }
@@ -1695,6 +1704,12 @@ func (o *Object) recalculateHash(ctx context.Context) error {
 	o.md5 = hashes[hash.MD5]
 	return nil
 }
+
+// ETag returns the object's ETag, "" if the server sent none.
+//
+// CloudWire patch (see docs/adr/0014): bisync's journal records it to tell
+// CloudWire's own uploads from changes made by anyone else.
+func (o *Object) ETag() string { return o.etag }
 
 func (o *Object) extraHeaders(ctx context.Context, src fs.ObjectInfo) map[string]string {
 	extraHeaders := map[string]string{}

@@ -65,6 +65,17 @@
         }
       }
     },
+    "%@ is running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ läuft"
+          }
+        }
+      }
+    },
     "%@ is used by another volume" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -537,6 +548,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ein kleiner Hintergrunddienst hält deine Laufwerke eingebunden und deine Offline-Elemente synchron – auch wenn dieses Fenster geschlossen ist."
+          }
+        }
+      }
+    },
+    "A sync is running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Synchronisation läuft"
           }
         }
       }
@@ -5688,6 +5710,28 @@
         }
       }
     },
+    "Restart for CloudWire %@ postponed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neustart für CloudWire %@ verschoben"
+          }
+        }
+      }
+    },
+    "Restarting the background service for CloudWire %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hintergrunddienst wird für CloudWire %@ neu gestartet"
+          }
+        }
+      }
+    },
     "Restore Defaults" : {
       "localizations" : {
         "de" : {
@@ -6883,6 +6927,16 @@
         }
       }
     },
+    "The background service switches to version %@ when no sync is running and no Studio Mode app is open." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Hintergrunddienst wechselt zu Version %@, sobald keine Synchronisation läuft und keine Studiomodus-App geöffnet ist."
+          }
+        }
+      }
+    },
     "The cloud folder was not found. Restore it in the cloud or remove the Offline Item." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7931,6 +7985,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Update verfügbar"
+          }
+        }
+      }
+    },
+    "Update pending" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update ausstehend"
           }
         }
       }

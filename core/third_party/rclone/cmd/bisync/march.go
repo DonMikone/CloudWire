@@ -21,6 +21,10 @@ type bisyncMarch struct {
 	marchLsLock    sync.Mutex
 	marchErrLock   sync.Mutex
 	marchCtx       context.Context
+	// CloudWire patch (see docs/adr/0014): ETags of the Path2 files of this
+	// march, for the journal. Kept out of the listing files, whose id column
+	// loadListing only accepts as "-".
+	etags2 map[string]string
 }
 
 func (b *bisyncRun) makeMarchListing(ctx context.Context) (*fileList, *fileList, error) {
@@ -123,6 +127,7 @@ func (b *bisyncRun) parse(e fs.DirEntry, isPath1 bool) {
 func (b *bisyncRun) setupListing() {
 	b.march.ls1 = newFileList()
 	b.march.ls2 = newFileList()
+	b.march.etags2 = map[string]string{}
 
 	// note that --ignore-listing-checksum is different from --ignore-checksum
 	// and we already checked it when we set b.opt.Compare.HashType1 and 2
@@ -167,6 +172,11 @@ func (b *bisyncRun) ForObject(o fs.Object, isPath1 bool) {
 	flags := "-" // "-" for a file and "d" for a directory
 	b.march.marchLsLock.Lock()
 	ls.put(o.Remote(), o.Size(), modtime, hashVal, id, flags)
+	if !isPath1 {
+		if etag := objectETag(o); etag != "" {
+			b.march.etags2[o.Remote()] = etag // CloudWire patch (see docs/adr/0014)
+		}
+	}
 	b.march.marchLsLock.Unlock()
 }
 

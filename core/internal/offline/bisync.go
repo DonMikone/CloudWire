@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -100,7 +101,9 @@ const (
 // BisyncParams builds the sync/bisync rc parameters of an item. force is
 // set only after the user confirmed a Mass-Delete Guard stop. listingCache
 // is one of the ListingCache modes, "" to keep bisync's default (off).
-func BisyncParams(it store.OfflineItem, remote string, p paths.Paths, label string, force bool, listingCache string) map[string]any {
+// settle is the Quiet Period: local files changed more recently are left
+// for a later run, they are still being written.
+func BisyncParams(it store.OfflineItem, remote string, p paths.Paths, label string, force bool, listingCache string, settle time.Duration) map[string]any {
 	cfg := map[string]any{
 		// A run with no changes is spent almost entirely listing the cloud,
 		// one PROPFIND per folder; rclone's default of 8 parallel listings
@@ -126,12 +129,15 @@ func BisyncParams(it store.OfflineItem, remote string, p paths.Paths, label stri
 		"conflictResolve":    "path1",
 		"conflictLoser":      "pathname",
 		"conflictSuffix":     ConflictSuffix(label),
-		"_config":            cfg,
+		// The transfer journal (fork patch, docs/adr/0014): a cloud version
+		// replaces or deletes a local file only on a proven Cloud Change;
+		// replaced local files go to the Trash. It also decides every resync.
+		"journal":    true,
+		"settleTime": settle.String(),
+		"_config":    cfg,
 	}
 	if it.NeedsResync {
-		// resyncMode implies a resync in rclone, so it is only sent when one is due.
 		params["resync"] = true
-		params["resyncMode"] = "newer"
 	}
 	if force {
 		params["force"] = true

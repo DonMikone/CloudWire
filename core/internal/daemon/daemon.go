@@ -17,6 +17,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,6 +68,8 @@ type Core struct {
 	startedAt int64
 	shutdown  chan struct{}
 	stopOnce  sync.Once
+	// updateDeferred: a restart for an update was postponed (logged once).
+	updateDeferred atomic.Bool
 
 	capMu    sync.Mutex
 	capCache map[string]sharing.Capabilities
@@ -225,7 +228,8 @@ func newCore(p paths.Paths, st *store.Store, configPass string) *Core {
 }
 
 // firstStart fills the settings that depend on the machine: the conflict
-// label from the system language and the Studio Mode apps.
+// label from the system language and Studio Mode, on with the installed DAWs
+// or off when there is none. Later starts keep what the user chose.
 func (c *Core) firstStart() {
 	s, err := c.st.Settings()
 	if err != nil || s.ConflictLabel != "" {
@@ -245,16 +249,14 @@ func (c *Core) firstStart() {
 		}
 	}
 	daws := pauserules.DetectDAWs("/Applications", filepath.Join(c.paths.Home, "Applications"))
-	if daws == nil {
-		daws = []string{}
-	}
+	sm := pauserules.StudioModeDefaults(daws)
 	if _, err := c.st.UpdateSettings(map[string]any{
 		"conflictLabel": label,
-		"pauseRules":    map[string]any{"studioMode": map[string]any{"apps": daws}},
+		"pauseRules":    map[string]any{"studioMode": map[string]any{"enabled": sm.Enabled, "apps": sm.Apps}},
 	}); err != nil {
 		slog.Error("first start settings", "err", err)
 	}
-	c.log.Info("core", "", msg.New("core.firstStart", "label", label, "count", len(daws)), daws)
+	c.log.Info("core", "", msg.New("core.firstStart", "label", label, "count", len(sm.Apps)), sm.Apps)
 }
 
 func (c *Core) run() int {

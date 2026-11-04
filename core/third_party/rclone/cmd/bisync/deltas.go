@@ -299,6 +299,20 @@ func (b *bisyncRun) applyDeltas(ctx context.Context, ds1, ds2 *deltaSet) (result
 	skippedDirs2 := newFileList()
 	b.renames = renames{}
 
+	// CloudWire patch (see docs/adr/0014): Path2 changes the journal explained
+	// as CloudWire's own work; the local version wins.
+	for f := range b.heal1to2 {
+		if !b.settling(f) {
+			b.indent("Path1", path2+f, "Queue copy to Path2 (local version wins)")
+			copy1to2.Add(f)
+		}
+	}
+	for f := range b.healDelete2 {
+		b.indent("Path2", path2+f, "Queue delete (deleted locally after CloudWire uploaded it)")
+		delete2.Add(f)
+		copy1to2.Add(f)
+	}
+
 	ctxMove := b.opt.setDryRun(ctx)
 
 	// update AliasMap for deleted files, as march does not know about them
@@ -381,11 +395,15 @@ func (b *bisyncRun) applyDeltas(ctx context.Context, ds1, ds2 *deltaSet) (result
 				d2, in2 = ds2.deltas[alias]
 			}
 			if !in2 {
-				b.indent("Path1", p2, "Queue copy to Path2")
-				copy1to2.Add(file)
+				if !b.settling(file) {
+					b.indent("Path1", p2, "Queue copy to Path2")
+					copy1to2.Add(file)
+				}
 			} else if d2.is(deltaDeleted) {
-				b.indent("Path1", p2, "Queue copy to Path2")
-				copy1to2.Add(file)
+				if !b.settling(file) {
+					b.indent("Path1", p2, "Queue copy to Path2")
+					copy1to2.Add(file)
+				}
 				handled.Add(file)
 			} else if d2.is(deltaOther) {
 				b.indent("!WARNING", file, "New or changed in both paths")
@@ -484,6 +502,9 @@ func (b *bisyncRun) applyDeltas(ctx context.Context, ds1, ds2 *deltaSet) (result
 			b.indent("Path1", p1, "Queue delete")
 			delete1.Add(file)
 			copy2to1.Add(file)
+			if b.trashDeleted != nil {
+				b.trashDeleted.Add(alias) // CloudWire patch (see docs/adr/0014)
+			}
 		}
 	}
 
@@ -497,7 +518,10 @@ func (b *bisyncRun) applyDeltas(ctx context.Context, ds1, ds2 *deltaSet) (result
 		results2to1, err = b.retryFastCopy(ctx, b.fs2, b.fs1, copy2to1, "copy2to1", results2to1, err)
 
 		if !b.InGracefulShutdown && err != nil {
-			return
+			if !b.keepGoing(err) {
+				return
+			}
+			err = nil
 		}
 
 		// copy empty dirs from path2 to path1 (if --create-empty-src-dirs)
@@ -507,13 +531,18 @@ func (b *bisyncRun) applyDeltas(ctx context.Context, ds1, ds2 *deltaSet) (result
 	if copy1to2.NotEmpty() && !b.InGracefulShutdown {
 		b.indent("Path1", "Path2", "Do queued copies to")
 		ctx = b.setBackupDir(ctx, 2)
+		b.beforeUploads(copy1to2, delete2) // CloudWire patch (see docs/adr/0014)
 		results1to2, err = b.fastCopy(ctx, b.fs1, b.fs2, copy1to2, "copy1to2")
 
 		// retries, if any
 		results1to2, err = b.retryFastCopy(ctx, b.fs1, b.fs2, copy1to2, "copy1to2", results1to2, err)
+		b.afterFailedUploads(ctx, results1to2) // CloudWire patch (see docs/adr/0014)
 
 		if !b.InGracefulShutdown && err != nil {
-			return
+			if !b.keepGoing(err) {
+				return
+			}
+			err = nil
 		}
 
 		// copy empty dirs from path1 to path2 (if --create-empty-src-dirs)

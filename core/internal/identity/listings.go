@@ -40,19 +40,32 @@ func listingFiles(workdir string) ([]string, error) {
 // upload or download forgets them (bisync then copies the new name as a new
 // file). Root renames leave them alone.
 func RewriteListings(workdir string, rs []sv.Rename) error {
+	return mapListings(workdir, func(p string) (string, bool) { return renamePath(p, rs) })
+}
+
+// ForgetExcluded drops the paths that excluded reports from bisync's
+// listings. After new exclude patterns their files are missing from both
+// sides' new listings; still listed, they would count as deleted on both sides
+// and could trip the Mass-Delete Guard. Nothing is deleted on either side.
+func ForgetExcluded(workdir string, excluded func(string) bool) error {
+	return mapListings(workdir, func(p string) (string, bool) { return p, !excluded(p) })
+}
+
+// mapListings rewrites every listed path with fn; false drops the entry.
+func mapListings(workdir string, fn func(string) (string, bool)) error {
 	files, err := listingFiles(workdir)
 	if err != nil {
 		return err
 	}
 	for _, f := range files {
-		if err := rewriteListing(f, rs); err != nil {
+		if err := rewriteListing(f, fn); err != nil {
 			return fmt.Errorf("%s: %w", filepath.Base(f), err)
 		}
 	}
 	return nil
 }
 
-func rewriteListing(file string, rs []sv.Rename) error {
+func rewriteListing(file string, fn func(string) (string, bool)) error {
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return err
@@ -79,7 +92,7 @@ func rewriteListing(file string, rs []sv.Rename) error {
 			out.WriteString(line + "\n")
 			continue
 		}
-		name, keep := renamePath(name, rs)
+		name, keep := fn(name)
 		if keep {
 			out.WriteString(line[:m[12]] + strconv.Quote(name) + "\n")
 		}

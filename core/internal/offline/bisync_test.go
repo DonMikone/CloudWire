@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rclone/rclone/fs/filter"
 
@@ -19,7 +20,7 @@ func testPaths() paths.Paths { return paths.ForHome("/Users/mike") }
 func TestBisyncParamsFolder(t *testing.T) {
 	it := store.OfflineItem{ID: "abc", Kind: "folder", RemotePath: "Music/Projekte", StoragePath: "/Users/mike/CloudWire/Nextcloud/Music/Projekte",
 		Advanced: map[string]any{"Checkers": 4}}
-	got := BisyncParams(it, "cw-x1", testPaths(), "Konflikt", false, "")
+	got := BisyncParams(it, "cw-x1", testPaths(), "Konflikt", false, "", time.Minute)
 	want := map[string]any{
 		"path1":              "/Users/mike/CloudWire/Nextcloud/Music/Projekte",
 		"path2":              "cw-x1:Music/Projekte",
@@ -34,20 +35,21 @@ func TestBisyncParamsFolder(t *testing.T) {
 		"conflictResolve":    "path1",
 		"conflictLoser":      "pathname",
 		"conflictSuffix":     "lokal,Konflikt {2006-01-02 1504}",
+		"journal":            true,
+		"settleTime":         "1m0s",
 		"_config":            map[string]any{"SuffixKeepExtension": true, "Checkers": 4},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("params mismatch\n got %#v\nwant %#v", got, want)
 	}
-	if _, ok := got["resyncMode"]; ok {
-		t.Fatal("resyncMode implies --resync in rclone and must only be sent when a resync is due")
-	}
 }
 
 func TestBisyncParamsResyncAndForce(t *testing.T) {
 	it := store.OfflineItem{ID: "f1", Kind: "files", RemotePath: "Music", Files: []string{"a.wav"}, StoragePath: "/Users/mike/CloudWire/NC/Music", NeedsResync: true}
-	got := BisyncParams(it, "cw-x1", testPaths(), "conflict", false, "")
-	if got["resync"] != true || got["resyncMode"] != "newer" || got["force"] != nil {
+	got := BisyncParams(it, "cw-x1", testPaths(), "conflict", false, "", time.Minute)
+	// The journal decides a resync (docs/adr/0014); --resync-mode newer let an
+	// older cloud upload replace a newer local file.
+	if got["resync"] != true || got["resyncMode"] != nil || got["force"] != nil {
 		t.Fatalf("resync item: %#v", got)
 	}
 	if got["path2"] != "cw-x1:Music" || got["conflictSuffix"] != "lokal,conflict {2006-01-02 1504}" {
@@ -57,14 +59,14 @@ func TestBisyncParamsResyncAndForce(t *testing.T) {
 		t.Fatalf("without an Advanced override, folders are listed %d in parallel: %#v", Checkers, cfg)
 	}
 	it.NeedsResync = false
-	got = BisyncParams(it, "cw-x1", testPaths(), "conflict", true, "")
+	got = BisyncParams(it, "cw-x1", testPaths(), "conflict", true, "", time.Minute)
 	if got["force"] != true || got["resync"] != nil {
 		t.Fatalf("confirmed mass delete: %#v", got)
 	}
 	if got["listingCache"] != nil {
 		t.Fatalf("without a mode bisync keeps its default (no listing cache): %#v", got)
 	}
-	if got = BisyncParams(it, "cw-x1", testPaths(), "conflict", false, ListingCacheUse); got["listingCache"] != ListingCacheUse {
+	if got = BisyncParams(it, "cw-x1", testPaths(), "conflict", false, ListingCacheUse, time.Minute); got["listingCache"] != ListingCacheUse {
 		t.Fatalf("listing cache mode not passed: %#v", got)
 	}
 }

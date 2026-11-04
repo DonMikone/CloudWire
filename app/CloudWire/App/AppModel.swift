@@ -97,6 +97,9 @@ final class AppModel {
     var recentProblems: [ActivityEntry] = []
     var latestActivity: ActivityEntry?
     var updateStatus: UpdateStatus?
+    /// The Core still runs its previous version after an App update: what it waits for (a sync or a Studio
+    /// Mode app). nil when it runs the App's build.
+    var pendingCoreUpdate: CoreText?
     var fuseStatus = FuseStatus()
     var migrations: [String: VaultMigrationEvent] = [:]
     var loginEvents: [String: NextcloudLoginEvent] = [:]
@@ -119,6 +122,7 @@ final class AppModel {
     private(set) var mainOptions: MainOptionsInfo?
 
     @ObservationIgnored private var startTask: Task<Void, Never>?
+    @ObservationIgnored private var updateRetryTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var stopping = false
     /// A connection loss reported while `connectLoop` still owned `startTask` (so `start()` was a no-op).
@@ -209,8 +213,10 @@ final class AppModel {
             if firstAttempt && coreState != .connected { coreState = .starting }
             firstAttempt = false
             do {
-                let info = try await CoreLauncher.ensureRunning(client: client)
-                coreInfo = info
+                let launch = try await CoreLauncher.ensureRunning(client: client)
+                coreInfo = launch.info
+                pendingCoreUpdate = launch.pendingUpdate
+                scheduleCoreUpdateRetry()
                 startEventLoop()
                 reconnectRequested = false
                 try await client.subscribeEvents(client: "app")
@@ -254,6 +260,17 @@ final class AppModel {
         startTask?.cancel()
         startTask = nil
         start()
+    }
+
+    /// While the Core postpones its restart into the App's version, asks again every 30 s.
+    private func scheduleCoreUpdateRetry() {
+        guard pendingCoreUpdate != nil, updateRetryTask == nil else { return }
+        updateRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, !Task.isCancelled else { return }
+            self.updateRetryTask = nil
+            if self.pendingCoreUpdate != nil, !self.stopping { self.start() }
+        }
     }
 
     private func startEventLoop() {

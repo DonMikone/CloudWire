@@ -7,9 +7,12 @@ package selection
 import (
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
+	"github.com/rclone/rclone/fs/filter"
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/DonMikone/CloudWire/core/internal/api"
@@ -154,43 +157,61 @@ func FirstUnselected(entries []string, rel string) string {
 	return ""
 }
 
-// Excluded reports whether a path relative to the storage root matches one
-// of the exclude patterns (used to ignore FSEvents).
+// Excluded reports whether a path relative to the storage root is excluded
+// by the patterns the way bisync's filters exclude it (FilterLines writes
+// them as "- pattern" rules): a pattern without a leading "/" matches at any
+// depth, "*" stays within a name, and a pattern containing "**" (or ending in
+// "/") also excludes the folders it matches and all below them.
 func Excluded(rel string, excludes []string) bool {
 	rel = strings.Trim(filepath.ToSlash(rel), "/")
 	if rel == "" {
 		return false
 	}
-	parts := strings.Split(rel, "/")
-	base := parts[len(parts)-1]
-	if strings.HasSuffix(base, ".partial") {
+	if strings.HasSuffix(rel, ".partial") {
 		return true // rclone's in-progress downloads
 	}
 	for _, ex := range excludes {
-		ex = strings.TrimPrefix(strings.TrimSpace(ex), "/")
-		if strings.HasSuffix(ex, "/**") {
-			dir := strings.TrimSuffix(ex, "/**")
-			for _, p := range parts[:len(parts)-1] {
-				if ok, _ := path.Match(dir, p); ok {
-					return true
-				}
-			}
-			if ok, _ := path.Match(dir, base); ok {
-				return true
-			}
+		ex = strings.TrimSpace(ex)
+		if ex == "" {
 			continue
 		}
-		if strings.Contains(ex, "/") {
-			if ok, _ := path.Match(ex, rel); ok {
-				return true
-			}
+		if strings.HasSuffix(ex, "/") {
+			ex += "**"
+		}
+		re := globRegexp(ex)
+		if re == nil {
 			continue
 		}
-		for _, p := range parts {
-			if ok, _ := path.Match(ex, p); ok {
+		if re.MatchString(rel) {
+			return true
+		}
+		if !strings.Contains(ex, "**") {
+			continue // a file rule
+		}
+		// rclone matches folders as "dir/" and skips everything below an excluded one.
+		for i := range len(rel) {
+			if rel[i] == '/' && re.MatchString(rel[:i+1]) {
 				return true
 			}
+		}
+		if re.MatchString(rel + "/") {
+			return true
 		}
 	}
 	return false
+}
+
+var globCache sync.Map // pattern → *regexp.Regexp, nil if invalid
+
+// globRegexp compiles an rclone filter glob once.
+func globRegexp(glob string) *regexp.Regexp {
+	if re, ok := globCache.Load(glob); ok {
+		return re.(*regexp.Regexp)
+	}
+	re, err := filter.GlobPathToRegexp(glob, false)
+	if err != nil {
+		re = nil
+	}
+	globCache.Store(glob, re)
+	return re
 }

@@ -278,6 +278,7 @@ func (w *listCacheFs) listLive(ctx context.Context, dir string, callback fs.List
 				}
 			case fs.Object:
 				e.Size = x.Size()
+				e.ETag = objectETag(x) // the journal compares it (docs/adr/0014)
 			}
 			entries = append(entries, e)
 		}
@@ -327,7 +328,7 @@ func (w *listCacheFs) entries(dir string, rec *listCacheDir) fs.DirEntries {
 		if e.Dir {
 			out = append(out, fs.NewDir(remote, e.modTime()))
 		} else {
-			out = append(out, &cachedObject{f: w.Fs, remote: remote, size: e.Size, modTime: e.modTime()})
+			out = append(out, &cachedObject{f: w.Fs, remote: remote, size: e.Size, modTime: e.modTime(), etag: e.ETag})
 		}
 	}
 	return out
@@ -392,7 +393,11 @@ type cachedObject struct {
 	remote  string
 	size    int64
 	modTime time.Time
+	etag    string
 }
+
+// ETag returns the file's ETag as the listing that cached it reported it.
+func (o *cachedObject) ETag() string { return o.etag }
 
 func (o *cachedObject) real(ctx context.Context) (fs.Object, error) {
 	return o.f.NewObject(ctx, o.remote)

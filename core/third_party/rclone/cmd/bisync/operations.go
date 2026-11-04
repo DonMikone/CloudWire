@@ -58,6 +58,15 @@ type bisyncRun struct {
 	downloadHashOpt    downloadHashOpt
 	lockFileOpt        lockFileOpt
 	listCache          *listCacheFs // CloudWire patch (see docs/adr/0012): incremental Path2 listing
+	// CloudWire patch (see docs/adr/0014): transfer journal and local Trash.
+	journal         *journal
+	trashRun        string      // --backup-dir for Path1 in this run
+	trashDeleted    bilib.Names // Path1 files this run deletes on purpose
+	heal1to2        bilib.Names // Path1 files to upload after filtering own Path2 changes
+	healDelete2     bilib.Names // Path1 names whose own upload the user deleted locally
+	resyncCloudWins bilib.Names // Path2 files a journal resync copies over Path1
+	deferred        int         // Path1 files left for a later run (still being written)
+	transferErr     error       // first per-file transfer error of a journal run
 }
 
 type queues struct {
@@ -72,6 +81,13 @@ type queues struct {
 // Bisync handles lock file, performs bisync run and checks exit status
 func Bisync(ctx context.Context, fs1, fs2 fs.Fs, optArg *Options) (err error) {
 	opt := *optArg // ensure that input is never changed
+	if opt.Journal {
+		// CloudWire patch (see docs/adr/0014): the run sets --backup-dir (its
+		// Trash staging folder) through fs.GetConfig; on a context without its
+		// own config that would change the process-wide config for every later
+		// run of another item.
+		ctx, _ = fs.AddConfig(ctx)
+	}
 	b := &bisyncRun{
 		fs1:       fs1,
 		fs2:       fs2,
@@ -132,6 +148,17 @@ func Bisync(ctx context.Context, fs1, fs2 fs.Fs, optArg *Options) (err error) {
 		return err
 	}
 
+	// CloudWire patch (see docs/adr/0014): open the journal and settle local
+	// files a killed run left moved aside.
+	if err = b.openJournal(ctx); err != nil {
+		_ = b.removeLockFile()
+		return err
+	}
+	if b.journal != nil {
+		defer b.journal.close()
+		b.settleTrash(nil)
+	}
+
 	b.queueOpt.logger = operations.NewLoggerOpt()
 
 	// Handle SIGINT
@@ -145,7 +172,14 @@ func Bisync(ctx context.Context, fs1, fs2 fs.Fs, optArg *Options) (err error) {
 				} else {
 					fs.Log(nil, Color(terminal.YellowFg, "Attempting to gracefully shutdown. (Send exit signal again for immediate un-graceful shutdown.)"))
 					b.InGracefulShutdown = true
-					if b.SyncCI != nil {
+					if b.SyncCI != nil && b.journal != nil {
+						// CloudWire patch (see docs/adr/0014): stop at once. Transfers in
+						// flight are cancelled (they are retried next run); completed ones
+						// are in the journal and the listings are saved below.
+						fs.Infoc(nil, Color(terminal.YellowFg, "Canceling transfers in flight."))
+						b.CancelSync()
+						waitFor("Aborting Bisync if not done in", 60*time.Second, func() bool { return b.CleanupCompleted })
+					} else if b.SyncCI != nil {
 						fs.Infoc(nil, Color(terminal.YellowFg, "Telling Sync to wrap up early."))
 						b.SyncCI.MaxTransfer = 1
 						b.SyncCI.MaxDuration = fs.Duration(1 * time.Second)
@@ -189,6 +223,9 @@ func Bisync(ctx context.Context, fs1, fs2 fs.Fs, optArg *Options) (err error) {
 	}()
 	err = b.runLocked(ctx)
 	panicked = false
+	if b.journal != nil {
+		b.settleTrash(b.trashDeleted)
+	}
 
 	removeLockErr := b.removeLockFile()
 	if err == nil {
@@ -357,6 +394,8 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	// CloudWire patch (see docs/adr/0014): only Cloud Changes stay in ds2.
+	b.filterOwnChanges(fctx, ds1, ds2)
 	ds2.printStats()
 
 	// Check access health on the Path1 and Path2 filesystems
@@ -396,7 +435,7 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 	}
 
 	// Determine and apply changes to Path1 and Path2
-	noChanges := ds1.empty() && ds2.empty()
+	noChanges := ds1.empty() && ds2.empty() && !b.heal1to2.NotEmpty() && !b.healDelete2.NotEmpty()
 	results2to1 := []Results{}
 	results1to2 := []Results{}
 
@@ -482,6 +521,12 @@ func (b *bisyncRun) runLocked(octx context.Context) (err error) {
 			return err
 		}
 	}
+
+	// CloudWire patch (see docs/adr/0014): files that failed are rolled back in
+	// the listings and, like files still being written, left for a later run
+	// (journalSummary logs LeftForLaterRun); the run itself succeeded.
+	b.seedJournal()
+	b.journalSummary()
 
 	b.saveListCache() // CloudWire patch (see docs/adr/0012)
 	return nil

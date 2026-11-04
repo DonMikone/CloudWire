@@ -317,6 +317,9 @@ func (b *bisyncRun) rename(ctx context.Context, thisNamePair namePair, thisPath,
 		if !skip {
 			b.indent(fmt.Sprintf("!Path%d", thisPathNum), thisPath+thisNamePair.newName, fmt.Sprintf("Renaming Path%d copy", thisPathNum))
 			ctx = b.setBackupDir(ctx, thisPathNum) // in case already a file with new name
+			if thisPathNum == 2 && b.journal != nil {
+				b.journal.remove(thisNamePair.oldName) // CloudWire patch (see docs/adr/0014)
+			}
 			if err = operations.MoveFile(ctx, thisFs, thisFs, thisNamePair.newName, thisNamePair.oldName); err != nil {
 				err = fmt.Errorf("%s rename failed for %s: %w", thisPath, thisPath+thisNamePair.oldName, err)
 				b.critical = true

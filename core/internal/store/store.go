@@ -71,6 +71,25 @@ ALTER TABLE activity ADD COLUMN params TEXT;`,
 	// Migration 5: the inode of an Offline Item's Storage Location, so a renamed or moved
 	// Storage Location can be found again.
 	`ALTER TABLE offline_items ADD COLUMN root_ino INTEGER;`,
+	// Migration 6: DAW autosave folders joined the default excludes (docs/adr/0014); existing
+	// Offline Items and a customised default list get them too, the user's own patterns stay.
+	appendExcludesSQL("*.logicx/Alternatives/*/Autosave/**", "*.band/Alternatives/*/Autosave/**", "Auto Saves/**"),
+}
+
+// appendExcludesSQL appends each pattern missing from the Excludes of every Offline Item and
+// from a stored defaultExcludes setting. Patterns must not contain single quotes.
+func appendExcludesSQL(patterns ...string) string {
+	var b strings.Builder
+	for _, p := range patterns {
+		fmt.Fprintf(&b, `UPDATE offline_items SET excludes = json_insert(excludes, '$[#]', '%[1]s')
+  WHERE json_type(excludes) = 'array'
+    AND NOT EXISTS (SELECT 1 FROM json_each(offline_items.excludes) AS j WHERE j.value = '%[1]s');
+UPDATE settings SET value = json_insert(value, '$[#]', '%[1]s')
+  WHERE key = 'defaultExcludes' AND json_type(value) = 'array'
+    AND NOT EXISTS (SELECT 1 FROM json_each(settings.value) AS j WHERE j.value = '%[1]s');
+`, p)
+	}
+	return b.String()
 }
 
 // Open opens (and if needed creates and migrates) the database at path.
